@@ -1,0 +1,73 @@
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional
+
+
+@dataclass(frozen=True)
+class ChainConfig:
+    chain_id: str
+    name: str
+    subgraph_url: str
+
+
+@dataclass(frozen=True)
+class AssetConfig:
+    symbol: str
+    address: str
+
+
+@dataclass(frozen=True)
+class MarketConfig:
+    market_id: str
+    name: str
+    chain_id: str
+    assets: list[AssetConfig]
+
+
+@dataclass
+class RateModelParams:
+    optimal_utilization_rate: Decimal
+    base_variable_borrow_rate: Decimal
+    variable_rate_slope1: Decimal
+    variable_rate_slope2: Decimal
+
+    def compute_variable_borrow_rate(self, utilization: Decimal) -> Decimal:
+        """Compute variable borrow rate based on utilization using Aave v3 formula."""
+        if utilization <= self.optimal_utilization_rate:
+            return self.base_variable_borrow_rate + (
+                utilization * self.variable_rate_slope1 / self.optimal_utilization_rate
+            )
+        else:
+            excess = utilization - self.optimal_utilization_rate
+            excess_rate = Decimal("1") - self.optimal_utilization_rate
+            if excess_rate == 0:
+                return self.base_variable_borrow_rate + self.variable_rate_slope1
+            return (
+                self.base_variable_borrow_rate
+                + self.variable_rate_slope1
+                + (excess * self.variable_rate_slope2 / excess_rate)
+            )
+
+
+@dataclass
+class ReserveSnapshot:
+    timestamp_hour: datetime
+    chain_id: str
+    market_id: str
+    asset_symbol: str
+    asset_address: str
+    borrow_cap: Decimal
+    supply_cap: Decimal
+    supplied_amount: Decimal
+    supplied_value_usd: Optional[Decimal]
+    borrowed_amount: Decimal
+    borrowed_value_usd: Optional[Decimal]
+    utilization: Decimal
+    rate_model: Optional[RateModelParams]
+
+    @staticmethod
+    def compute_utilization(supplied: Decimal, borrowed: Decimal) -> Decimal:
+        if supplied == 0:
+            return Decimal("0")
+        return borrowed / supplied

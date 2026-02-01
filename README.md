@@ -10,6 +10,16 @@ Aave v3 risk monitoring demo.
 - Poetry
 - Docker & Docker Compose
 
+## Required Environment Variables
+
+```bash
+# The Graph API key (required for subgraph data)
+# Get a free key at https://thegraph.com/studio/ (100k queries/month free)
+export SUBGRAPH_API_KEY="your-api-key-here"
+```
+
+Add this to your `~/.bashrc` or `~/.zshrc` and restart your shell (or run `source ~/.bashrc`).
+
 ## Quick Start
 
 ```bash
@@ -27,6 +37,22 @@ Aave v3 risk monitoring demo.
 
 - **Web**: http://localhost:3000
 - **API**: http://127.0.0.1:8000
+
+## Data Ingestion
+
+### Aave V3 Subgraph Ingestion
+
+Fetch and store Aave V3 reserve data from The Graph subgraphs.
+
+```bash
+cd services/api
+PYTHONPATH=../.. poetry run python -m api.jobs.ingest_aave_v3 --hours 6 --interval 3600
+```
+
+**Database migrations:**
+```bash
+psql $DATABASE_URL < services/api/migrations/001_create_reserve_tables.sql
+```
 
 ## Python Import Style
 
