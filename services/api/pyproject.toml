@@ -18,7 +18,7 @@ httpx = "^0.28.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["../.."]
 
 [build-system]
 requires = ["poetry-core"]

@@ -10,65 +10,51 @@ Aave v3 risk monitoring demo.
 - Poetry
 - Docker & Docker Compose
 
-## Setup
-
-### Install web dependencies
+## Quick Start
 
 ```bash
-cd apps/web
-pnpm install
+# Install all dependencies
+./install.sh
+
+# Start all services (docker, api, web)
+./run.sh
+
+# Run all tests
+./test.sh
 ```
 
-### Install backend dependencies
+## Services
 
-```bash
-cd services/api
-poetry install
+- **Web**: http://localhost:3000
+- **API**: http://127.0.0.1:8000
+
+## Python Import Style
+
+This project uses absolute imports from the repository root (Google style). Always use full paths:
+
+```python
+# Correct
+from services.api.src.api.main import app
+
+# Incorrect (relative imports)
+from .main import app
+from api.main import app
 ```
 
-### Start Docker services
+### IDE Setup
 
-```bash
-cd infra
-docker compose up -d
+Add the repo root to your Python path for proper IDE support:
+
+**VS Code** (`.vscode/settings.json`):
+```json
+{
+  "python.analysis.extraPaths": ["${workspaceFolder}"]
+}
 ```
 
-## Development
+**PyCharm**: Right-click the repo root folder → Mark Directory as → Sources Root
 
-### Run web app
-
+**Shell** (for manual runs):
 ```bash
-cd apps/web
-pnpm dev
-```
-
-### Run API server
-
-```bash
-cd services/api
-poetry run uvicorn api.main:app --reload
-```
-
-## Testing
-
-### Backend tests
-
-```bash
-cd services/api
-poetry run pytest
-```
-
-### Frontend unit tests
-
-```bash
-cd apps/web
-pnpm test
-```
-
-### Frontend e2e tests
-
-```bash
-cd apps/web
-pnpm exec playwright install chromium
-pnpm test:e2e
+export PYTHONPATH="$(pwd)"
 ```

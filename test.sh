@@ -2,6 +2,8 @@
 set -e
 
 cd "$(dirname "$0")"
+REPO_ROOT="$(pwd)"
+export PYTHONPATH="$REPO_ROOT"
 
 # Check for Playwright OS dependencies on Linux before running e2e tests
 check_playwright_deps() {
