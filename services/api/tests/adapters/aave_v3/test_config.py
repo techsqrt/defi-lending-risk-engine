@@ -30,10 +30,12 @@ class TestChainSubgraphConfig:
             chain_id="test-chain",
             name="Test Chain",
             subgraph_url="https://api.example.com/subgraph",
+            pool_address="0x1234567890abcdef1234567890abcdef12345678",
         )
         assert chain.chain_id == "test-chain"
         assert chain.name == "Test Chain"
         assert chain.subgraph_url == "https://api.example.com/subgraph"
+        assert chain.pool_address == "0x1234567890abcdef1234567890abcdef12345678"
 
     def test_chain_config_requires_all_fields(self):
         with pytest.raises(Exception):
@@ -74,11 +76,13 @@ class TestAaveV3Config:
                     chain_id="chain-a",
                     name="Chain A",
                     subgraph_url="https://a.example.com",
+                    pool_address="0xaaaa",
                 ),
                 ChainSubgraphConfig(
                     chain_id="chain-b",
                     name="Chain B",
                     subgraph_url="https://b.example.com",
+                    pool_address="0xbbbb",
                 ),
             ],
             markets=[

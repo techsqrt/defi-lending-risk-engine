@@ -204,3 +204,46 @@ class TestReserveSnapshotRepository:
         assert abs(result.rate_model.base_variable_borrow_rate - Decimal("0")) < Decimal("1e-15")
         assert abs(result.rate_model.variable_rate_slope1 - Decimal("0.04")) < Decimal("1e-15")
         assert abs(result.rate_model.variable_rate_slope2 - Decimal("0.75")) < Decimal("1e-15")
+
+    def test_get_latest_per_asset(self, repository):
+        def make_snapshot(hour: int, addr: str) -> ReserveSnapshot:
+            return ReserveSnapshot(
+                timestamp_hour=datetime(2020, 1, 1, hour, 0, 0, tzinfo=timezone.utc),
+                chain_id="chain_1",
+                market_id="market_1",
+                asset_symbol="SYM",
+                asset_address=addr,
+                borrow_cap=Decimal("1"),
+                supply_cap=Decimal("1"),
+                supplied_amount=Decimal("1"),
+                supplied_value_usd=None,
+                borrowed_amount=Decimal("1"),
+                borrowed_value_usd=None,
+                utilization=Decimal("0.5"),
+                rate_model=None,
+            )
+
+        repository.upsert_snapshots([
+            make_snapshot(0, "addr_1"),
+            make_snapshot(1, "addr_1"),
+            make_snapshot(0, "addr_2"),
+            make_snapshot(1, "addr_2"),
+        ])
+
+        results = repository.get_latest_per_asset()
+
+        assert len(results) == 2
+        assert all(r.timestamp_hour.hour == 1 for r in results)
+
+    def test_get_existing_timestamps(self, repository, sample_snapshot):
+        repository.upsert_snapshots([sample_snapshot])
+
+        result = repository.get_existing_timestamps(
+            chain_id=sample_snapshot.chain_id,
+            market_id=sample_snapshot.market_id,
+            asset_address=sample_snapshot.asset_address,
+            from_time=datetime(2023, 11, 14, 0, 0, 0, tzinfo=timezone.utc),
+            to_time=datetime(2023, 11, 15, 0, 0, 0, tzinfo=timezone.utc),
+        )
+
+        assert len(result) == 1

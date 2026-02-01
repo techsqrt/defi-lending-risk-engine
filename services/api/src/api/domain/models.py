@@ -65,6 +65,17 @@ class ReserveSnapshot:
     borrowed_value_usd: Optional[Decimal]
     utilization: Decimal
     rate_model: Optional[RateModelParams]
+    # Actual rates from subgraph (as decimal, e.g., 0.05 = 5%)
+    variable_borrow_rate: Optional[Decimal] = None
+    liquidity_rate: Optional[Decimal] = None
+    stable_borrow_rate: Optional[Decimal] = None
+    # Price fields
+    price_usd: Optional[Decimal] = None
+    price_eth: Optional[Decimal] = None
+    # Available liquidity
+    available_liquidity: Optional[Decimal] = None
+    # Raw timestamp from subgraph (used for deduplication)
+    raw_timestamp: Optional[int] = None
 
     @staticmethod
     def compute_utilization(supplied: Decimal, borrowed: Decimal) -> Decimal:

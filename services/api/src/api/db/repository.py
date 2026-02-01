@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
-from typing import Sequence
+from typing import Any, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
@@ -51,6 +51,13 @@ class ReserveSnapshotRepository:
                 "variable_rate_slope2": (
                     s.rate_model.variable_rate_slope2 if s.rate_model else None
                 ),
+                # New fields
+                "variable_borrow_rate": s.variable_borrow_rate,
+                "liquidity_rate": s.liquidity_rate,
+                "stable_borrow_rate": s.stable_borrow_rate,
+                "price_usd": s.price_usd,
+                "price_eth": s.price_eth,
+                "available_liquidity": s.available_liquidity,
             }
             rows.append(row)
 
@@ -76,6 +83,12 @@ class ReserveSnapshotRepository:
                 "base_variable_borrow_rate": stmt.excluded.base_variable_borrow_rate,
                 "variable_rate_slope1": stmt.excluded.variable_rate_slope1,
                 "variable_rate_slope2": stmt.excluded.variable_rate_slope2,
+                "variable_borrow_rate": stmt.excluded.variable_borrow_rate,
+                "liquidity_rate": stmt.excluded.liquidity_rate,
+                "stable_borrow_rate": stmt.excluded.stable_borrow_rate,
+                "price_usd": stmt.excluded.price_usd,
+                "price_eth": stmt.excluded.price_eth,
+                "available_liquidity": stmt.excluded.available_liquidity,
             },
         )
         result = conn.execute(stmt)
@@ -99,10 +112,48 @@ class ReserveSnapshotRepository:
                 "base_variable_borrow_rate": stmt.excluded.base_variable_borrow_rate,
                 "variable_rate_slope1": stmt.excluded.variable_rate_slope1,
                 "variable_rate_slope2": stmt.excluded.variable_rate_slope2,
+                "variable_borrow_rate": stmt.excluded.variable_borrow_rate,
+                "liquidity_rate": stmt.excluded.liquidity_rate,
+                "stable_borrow_rate": stmt.excluded.stable_borrow_rate,
+                "price_usd": stmt.excluded.price_usd,
+                "price_eth": stmt.excluded.price_eth,
+                "available_liquidity": stmt.excluded.available_liquidity,
             },
         )
         result = conn.execute(stmt)
         return result.rowcount
+
+    def _row_to_snapshot(self, row: Any) -> ReserveSnapshot:
+        """Convert a database row to a ReserveSnapshot domain object."""
+        rate_model = None
+        if row.optimal_utilization_rate is not None:
+            rate_model = RateModelParams(
+                optimal_utilization_rate=row.optimal_utilization_rate,
+                base_variable_borrow_rate=row.base_variable_borrow_rate,
+                variable_rate_slope1=row.variable_rate_slope1,
+                variable_rate_slope2=row.variable_rate_slope2,
+            )
+        return ReserveSnapshot(
+            timestamp_hour=row.timestamp_hour,
+            chain_id=row.chain_id,
+            market_id=row.market_id,
+            asset_symbol=row.asset_symbol,
+            asset_address=row.asset_address,
+            borrow_cap=row.borrow_cap,
+            supply_cap=row.supply_cap,
+            supplied_amount=row.supplied_amount,
+            supplied_value_usd=row.supplied_value_usd,
+            borrowed_amount=row.borrowed_amount,
+            borrowed_value_usd=row.borrowed_value_usd,
+            utilization=row.utilization,
+            rate_model=rate_model,
+            variable_borrow_rate=getattr(row, "variable_borrow_rate", None),
+            liquidity_rate=getattr(row, "liquidity_rate", None),
+            stable_borrow_rate=getattr(row, "stable_borrow_rate", None),
+            price_usd=getattr(row, "price_usd", None),
+            price_eth=getattr(row, "price_eth", None),
+            available_liquidity=getattr(row, "available_liquidity", None),
+        )
 
     def get_snapshots(
         self,
@@ -124,34 +175,82 @@ class ReserveSnapshotRepository:
 
         with self.engine.connect() as conn:
             result = conn.execute(stmt)
-            snapshots = []
-            for row in result:
-                rate_model = None
-                if row.optimal_utilization_rate is not None:
-                    rate_model = RateModelParams(
-                        optimal_utilization_rate=row.optimal_utilization_rate,
-                        base_variable_borrow_rate=row.base_variable_borrow_rate,
-                        variable_rate_slope1=row.variable_rate_slope1,
-                        variable_rate_slope2=row.variable_rate_slope2,
-                    )
-                snapshots.append(
-                    ReserveSnapshot(
-                        timestamp_hour=row.timestamp_hour,
-                        chain_id=row.chain_id,
-                        market_id=row.market_id,
-                        asset_symbol=row.asset_symbol,
-                        asset_address=row.asset_address,
-                        borrow_cap=row.borrow_cap,
-                        supply_cap=row.supply_cap,
-                        supplied_amount=row.supplied_amount,
-                        supplied_value_usd=row.supplied_value_usd,
-                        borrowed_amount=row.borrowed_amount,
-                        borrowed_value_usd=row.borrowed_value_usd,
-                        utilization=row.utilization,
-                        rate_model=rate_model,
-                    )
-                )
-            return snapshots
+            return [self._row_to_snapshot(row) for row in result]
+
+    def get_latest_snapshot(
+        self,
+        chain_id: str,
+        market_id: str,
+        asset_address: str,
+    ) -> ReserveSnapshot | None:
+        """Get the most recent snapshot for a specific asset."""
+        stmt = (
+            select(reserve_snapshots_hourly)
+            .where(reserve_snapshots_hourly.c.chain_id == chain_id)
+            .where(reserve_snapshots_hourly.c.market_id == market_id)
+            .where(reserve_snapshots_hourly.c.asset_address == asset_address)
+            .order_by(reserve_snapshots_hourly.c.timestamp_hour.desc())
+            .limit(1)
+        )
+
+        with self.engine.connect() as conn:
+            result = conn.execute(stmt)
+            row = result.fetchone()
+            if row is None:
+                return None
+            return self._row_to_snapshot(row)
+
+    def get_latest_per_asset(self) -> list[ReserveSnapshot]:
+        """Get the latest snapshot for each (chain, market, asset) combination."""
+        # Subquery to get max timestamp per asset
+        subq = (
+            select(
+                reserve_snapshots_hourly.c.chain_id,
+                reserve_snapshots_hourly.c.market_id,
+                reserve_snapshots_hourly.c.asset_address,
+                func.max(reserve_snapshots_hourly.c.timestamp_hour).label("max_ts"),
+            )
+            .group_by(
+                reserve_snapshots_hourly.c.chain_id,
+                reserve_snapshots_hourly.c.market_id,
+                reserve_snapshots_hourly.c.asset_address,
+            )
+            .subquery()
+        )
+
+        stmt = select(reserve_snapshots_hourly).join(
+            subq,
+            (reserve_snapshots_hourly.c.chain_id == subq.c.chain_id)
+            & (reserve_snapshots_hourly.c.market_id == subq.c.market_id)
+            & (reserve_snapshots_hourly.c.asset_address == subq.c.asset_address)
+            & (reserve_snapshots_hourly.c.timestamp_hour == subq.c.max_ts),
+        )
+
+        with self.engine.connect() as conn:
+            result = conn.execute(stmt)
+            return [self._row_to_snapshot(row) for row in result]
+
+    def get_existing_timestamps(
+        self,
+        chain_id: str,
+        market_id: str,
+        asset_address: str,
+        from_time: datetime,
+        to_time: datetime,
+    ) -> set[datetime]:
+        """Get set of existing hourly timestamps for backfill gap detection."""
+        stmt = (
+            select(reserve_snapshots_hourly.c.timestamp_hour)
+            .where(reserve_snapshots_hourly.c.chain_id == chain_id)
+            .where(reserve_snapshots_hourly.c.market_id == market_id)
+            .where(reserve_snapshots_hourly.c.asset_address == asset_address)
+            .where(reserve_snapshots_hourly.c.timestamp_hour >= from_time)
+            .where(reserve_snapshots_hourly.c.timestamp_hour <= to_time)
+        )
+
+        with self.engine.connect() as conn:
+            result = conn.execute(stmt)
+            return {row.timestamp_hour for row in result}
 
 
 class RateModelParamsRepository:

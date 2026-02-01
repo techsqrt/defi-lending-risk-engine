@@ -1,9 +1,12 @@
 #!/bin/sh
 set -e
 
-cd "$(dirname "$0")"
-REPO_ROOT="$(pwd)"
+# Auto-detect repo root from script location
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+export REPO_ROOT
 export PYTHONPATH="$REPO_ROOT"
+
+cd "$REPO_ROOT"
 
 # Check for Playwright OS dependencies on Linux before running e2e tests
 check_playwright_deps() {
@@ -40,22 +43,24 @@ check_playwright_deps() {
     fi
 }
 
+echo "==> REPO_ROOT: $REPO_ROOT"
+
 echo "==> Running backend tests"
-cd services/api
+cd "$REPO_ROOT/services/api"
 poetry run pytest
-cd ../..
+cd "$REPO_ROOT"
 
 echo "==> Running frontend unit tests"
-cd apps/web
+cd "$REPO_ROOT/apps/web"
 pnpm test
-cd ../..
+cd "$REPO_ROOT"
 
 echo "==> Checking Playwright dependencies"
 check_playwright_deps
 
 echo "==> Running frontend e2e tests"
-cd apps/web
+cd "$REPO_ROOT/apps/web"
 pnpm test:e2e
-cd ../..
+cd "$REPO_ROOT"
 
 echo "==> All tests passed"

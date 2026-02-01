@@ -53,6 +53,10 @@ class AaveV3Client:
     ) -> list[ReserveSnapshot]:
         """Fetch historical reserve snapshots for a market from a given timestamp."""
         fetcher = self._get_fetcher(chain_id)
+        chain = self.config.get_chain(chain_id)
+        if not chain:
+            raise ValueError(f"Unknown chain: {chain_id}")
+
         snapshots = []
 
         current_response = fetcher.fetch_reserves(
@@ -62,12 +66,17 @@ class AaveV3Client:
         rate_models = {}
         for reserve in current_reserves:
             addr = reserve.get("underlyingAsset", "").lower()
-            strategy = reserve.get("reserveInterestRateStrategy")
-            if strategy:
-                rate_models[addr] = transform_rate_strategy(strategy)
+            # Rate params are directly on the reserve, not nested
+            if reserve.get("optimalUtilisationRate"):
+                rate_models[addr] = transform_rate_strategy({
+                    "optimalUsageRatio": reserve.get("optimalUtilisationRate"),
+                    "baseVariableBorrowRate": reserve.get("baseVariableBorrowRate"),
+                    "variableRateSlope1": reserve.get("variableRateSlope1"),
+                    "variableRateSlope2": reserve.get("variableRateSlope2"),
+                })
 
         for asset in market.assets:
-            reserve_id = f"{asset.address.lower()}0x2f39d218133afab8f2b819b1066c7e434ad94e9e"
+            reserve_id = f"{asset.address.lower()}{chain.pool_address}"
 
             response = fetcher.fetch_reserve_history(reserve_id, from_timestamp)
             items = response.get("data", {}).get("reserveParamsHistoryItems", [])

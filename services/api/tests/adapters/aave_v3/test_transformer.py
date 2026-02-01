@@ -5,11 +5,72 @@ import pytest
 
 from services.api.src.api.adapters.aave_v3.transformer import (
     TransformationError,
+    round_timestamp_to_interval,
     transform_history_item_to_snapshot,
     transform_rate_strategy,
     transform_reserve_to_snapshot,
 )
 from services.api.src.api.domain.models import RateModelParams
+
+
+class TestRoundTimestampToInterval:
+    """Tests for round_timestamp_to_interval function."""
+
+    def test_hourly_interval_rounds_down(self):
+        # 22:25:25 -> 22:00:00
+        ts = 1700000725  # 2023-11-14 22:25:25 UTC
+        result = round_timestamp_to_interval(ts, 3600)
+        expected = datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_hourly_interval_exact_hour(self):
+        # 22:00:00 -> 22:00:00
+        ts = 1699999200  # 2023-11-14 22:00:00 UTC
+        result = round_timestamp_to_interval(ts, 3600)
+        expected = datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_10min_interval_rounds_down(self):
+        # 22:25:25 -> 22:20:00
+        ts = 1700000725  # 2023-11-14 22:25:25 UTC
+        result = round_timestamp_to_interval(ts, 600)
+        expected = datetime(2023, 11, 14, 22, 20, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_10min_interval_at_boundary(self):
+        # 22:20:00 -> 22:20:00
+        ts = 1700000400  # 2023-11-14 22:20:00 UTC
+        result = round_timestamp_to_interval(ts, 600)
+        expected = datetime(2023, 11, 14, 22, 20, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_30min_interval_rounds_down(self):
+        # 22:25:25 -> 22:00:00 (rounds to 30-min boundary)
+        ts = 1700000725  # 2023-11-14 22:25:25 UTC
+        result = round_timestamp_to_interval(ts, 1800)
+        expected = datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_30min_interval_second_half(self):
+        # 22:45:00 -> 22:30:00
+        ts = 1700001900  # 2023-11-14 22:45:00 UTC
+        result = round_timestamp_to_interval(ts, 1800)
+        expected = datetime(2023, 11, 14, 22, 30, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_6hour_interval_rounds_down(self):
+        # 22:25:25 -> 18:00:00
+        ts = 1700000725  # 2023-11-14 22:25:25 UTC
+        result = round_timestamp_to_interval(ts, 21600)
+        expected = datetime(2023, 11, 14, 18, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_daily_interval_rounds_down(self):
+        # 22:25:25 -> 00:00:00 same day
+        ts = 1700000725  # 2023-11-14 22:25:25 UTC
+        result = round_timestamp_to_interval(ts, 86400)
+        expected = datetime(2023, 11, 14, 0, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
 
 
 class TestTransformRateStrategy:
@@ -51,31 +112,29 @@ class TestTransformRateStrategy:
 class TestTransformReserveToSnapshot:
     @pytest.fixture
     def sample_reserve_data(self):
+        WAD = 10**18
+        RAY = 10**27
         return {
-            "id": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc20x2f39d218133afab8f2b819b1066c7e434ad94e9e",
-            "underlyingAsset": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-            "symbol": "WETH",
-            "name": "Wrapped Ether",
+            "id": "test-reserve-id",
+            "underlyingAsset": "0xtest",
+            "symbol": "TEST",
+            "name": "Test Token",
             "decimals": 18,
-            "totalLiquidity": "1000000000000000000000",
-            "availableLiquidity": "600000000000000000000",
-            "totalCurrentVariableDebt": "300000000000000000000",
-            "totalPrincipalStableDebt": "100000000000000000000",
+            "totalLiquidity": str(1000 * WAD),  # 1000 tokens
+            "availableLiquidity": str(600 * WAD),  # 600 available
+            "totalCurrentVariableDebt": str(300 * WAD),  # 300 variable debt
+            "totalPrincipalStableDebt": str(100 * WAD),  # 100 stable debt
             "borrowingEnabled": True,
             "usageAsCollateralEnabled": True,
             "reserveFactor": "1000",
             "borrowCap": "100000",
             "supplyCap": "200000",
-            "price": {
-                "priceInEth": "1000000000000000000",
-                "priceSource": "0x0",
-            },
-            "reserveInterestRateStrategy": {
-                "optimalUsageRatio": "800000000000000000000000000",
-                "baseVariableBorrowRate": "0",
-                "variableRateSlope1": "40000000000000000000000000",
-                "variableRateSlope2": "750000000000000000000000000",
-            },
+            "price": {"priceInEth": str(WAD)},  # 1 ETH
+            # Flat rate model fields (as returned by subgraph)
+            "optimalUtilisationRate": str(8 * RAY // 10),  # 80% (exact)
+            "baseVariableBorrowRate": "0",
+            "variableRateSlope1": str(4 * RAY // 100),  # 4% (exact)
+            "variableRateSlope2": str(75 * RAY // 100),  # 75% (exact)
             "lastUpdateTimestamp": 1700000000,
         }
 
@@ -87,8 +146,8 @@ class TestTransformReserveToSnapshot:
         assert snapshot is not None
         assert snapshot.chain_id == "ethereum"
         assert snapshot.market_id == "aave-v3-ethereum"
-        assert snapshot.asset_symbol == "WETH"
-        assert snapshot.asset_address == "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        assert snapshot.asset_symbol == "TEST"
+        assert snapshot.asset_address == "0xtest"
 
     def test_transforms_amounts(self, sample_reserve_data):
         snapshot = transform_reserve_to_snapshot(
@@ -197,8 +256,8 @@ class TestTransformHistoryItemToSnapshot:
             "totalPrincipalStableDebt": "100000000000000000000",
             "borrowCap": "100000",
             "supplyCap": "200000",
-            "priceInEth": "1000000000000000000",
-            "priceInUsd": "2000000000000000000000",
+            "priceInEth": "100000000",  # 1 ETH in 8 decimals
+            "priceInUsd": "200000000000",  # $2000 in 8 decimals
             "timestamp": 1700000000,
         }
 

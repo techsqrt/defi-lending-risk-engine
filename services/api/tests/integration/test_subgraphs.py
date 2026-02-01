@@ -24,17 +24,25 @@ def require_api_key():
             "Get a free key at https://thegraph.com/studio/"
         )
 
+# Required by transformer (required=True in _get_field)
 REQUIRED_RESERVE_FIELDS = [
     "id",
     "underlyingAsset",
     "symbol",
     "decimals",
     "totalLiquidity",
-    "availableLiquidity",
     "totalCurrentVariableDebt",
-    "borrowCap",
-    "supplyCap",
+    "totalPrincipalStableDebt",
     "lastUpdateTimestamp",
+]
+
+# Required by transformer for history items
+REQUIRED_HISTORY_FIELDS = [
+    "reserve",
+    "timestamp",
+    "totalLiquidity",
+    "totalCurrentVariableDebt",
+    "totalPrincipalStableDebt",
 ]
 
 REQUIRED_RATE_STRATEGY_FIELDS = [
@@ -126,3 +134,39 @@ class TestSubgraphEndpoints:
                         f"Chain {chain.chain_id}, Market {market.market_id}: "
                         f"asset {asset.symbol} ({asset.address}) not found"
                     )
+
+    def test_history_response_format(self, config):
+        """Verify history responses contain all required fields."""
+        import time
+
+        for chain in config.chains:
+            fetcher = AaveV3Fetcher(chain.get_url())
+            markets = config.get_markets_for_chain(chain.chain_id)
+
+            assert markets, f"Chain {chain.chain_id}: no markets configured"
+
+            # Get reserve ID for first asset
+            addresses = [a.address for a in markets[0].assets]
+            response = fetcher.fetch_reserves(addresses)
+            reserves = response.get("data", {}).get("reserves", [])
+
+            assert reserves, f"Chain {chain.chain_id}: no reserves returned"
+
+            reserve_id = reserves[0]["id"]
+            from_ts = int(time.time()) - 86400  # 24h ago
+
+            history = fetcher.fetch_reserve_history(reserve_id, from_ts)
+
+            if history is None:
+                continue  # API returned null
+
+            items = history.get("data", {}).get("reserveParamsHistoryItems", [])
+
+            if not items:
+                continue  # No history data available
+
+            item = items[0]
+            for field in REQUIRED_HISTORY_FIELDS:
+                assert field in item, (
+                    f"Chain {chain.chain_id}: missing history field '{field}'"
+                )

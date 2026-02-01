@@ -6,6 +6,7 @@ from services.api.src.api.domain.models import RateModelParams, ReserveSnapshot
 
 RAY = Decimal("1e27")
 WAD = Decimal("1e18")
+PRICE_DECIMALS = Decimal("1e8")  # Chainlink price feeds use 8 decimals
 
 
 class TransformationError(Exception):
@@ -38,6 +39,18 @@ def _timestamp_to_hour(ts: int) -> datetime:
     return datetime.fromtimestamp(hour_ts, tz=timezone.utc)
 
 
+def round_timestamp_to_interval(ts: int, interval_seconds: int) -> datetime:
+    """Round timestamp down to the nearest interval boundary.
+
+    Examples:
+        - interval=3600 (1h): 13:45:25 -> 13:00:00
+        - interval=600 (10m): 13:45:25 -> 13:40:00
+        - interval=1800 (30m): 13:45:25 -> 13:30:00
+    """
+    rounded_ts = (ts // interval_seconds) * interval_seconds
+    return datetime.fromtimestamp(rounded_ts, tz=timezone.utc)
+
+
 def transform_reserve_to_snapshot(
     reserve_data: dict[str, Any],
     chain_id: str,
@@ -66,23 +79,38 @@ def transform_reserve_to_snapshot(
     borrow_cap = Decimal(_get_field(reserve_data, "borrowCap", required=False, default="0"))
     supply_cap = Decimal(_get_field(reserve_data, "supplyCap", required=False, default="0"))
 
-    # Optional: price data may not be available
+    # Optional: price data (priceInEth is the asset price in ETH terms)
+    price_eth: Decimal | None = None
     supplied_value_usd = None
     borrowed_value_usd = None
     price_data = _get_field(reserve_data, "price", required=False, default={})
     if price_data:
-        price_in_eth = _get_field(price_data, "priceInEth", required=False)
-        if price_in_eth:
-            price_in_usd = _to_decimal(price_in_eth, WAD)
-            if price_in_usd > 0:
-                supplied_value_usd = supplied_amount * price_in_usd
-                borrowed_value_usd = borrowed_amount * price_in_usd
+        price_in_eth_raw = _get_field(price_data, "priceInEth", required=False)
+        if price_in_eth_raw:
+            price_eth = _to_decimal(price_in_eth_raw, WAD)
+
+    # Optional: available liquidity
+    available_liquidity: Decimal | None = None
+    available_liquidity_raw = _get_field(reserve_data, "availableLiquidity", required=False)
+    if available_liquidity_raw:
+        available_liquidity = _to_decimal(available_liquidity_raw, asset_scale)
 
     utilization = ReserveSnapshot.compute_utilization(supplied_amount, borrowed_amount)
 
-    # Optional: rate strategy may not be present
-    strategy = _get_field(reserve_data, "reserveInterestRateStrategy", required=False)
-    rate_model = transform_rate_strategy(strategy) if strategy else None
+    # Optional: rate strategy params for curve display
+    rate_model = None
+    optimal_raw = _get_field(reserve_data, "optimalUtilisationRate", required=False)
+    base_rate_raw = _get_field(reserve_data, "baseVariableBorrowRate", required=False)
+    slope1_raw = _get_field(reserve_data, "variableRateSlope1", required=False)
+    slope2_raw = _get_field(reserve_data, "variableRateSlope2", required=False)
+
+    if all([optimal_raw, base_rate_raw, slope1_raw, slope2_raw]):
+        rate_model = RateModelParams(
+            optimal_utilization_rate=_to_decimal(optimal_raw, RAY),
+            base_variable_borrow_rate=_to_decimal(base_rate_raw, RAY),
+            variable_rate_slope1=_to_decimal(slope1_raw, RAY),
+            variable_rate_slope2=_to_decimal(slope2_raw, RAY),
+        )
 
     return ReserveSnapshot(
         timestamp_hour=_timestamp_to_hour(ts),
@@ -98,6 +126,8 @@ def transform_reserve_to_snapshot(
         borrowed_value_usd=borrowed_value_usd,
         utilization=utilization,
         rate_model=rate_model,
+        price_eth=price_eth,
+        available_liquidity=available_liquidity,
     )
 
 
@@ -126,19 +156,49 @@ def transform_history_item_to_snapshot(
     supplied_amount = total_liquidity
     borrowed_amount = variable_debt + stable_debt
 
-    # Optional fields (0 = no cap in Aave)
-    borrow_cap = Decimal(_get_field(item, "borrowCap", required=False, default="0"))
-    supply_cap = Decimal(_get_field(item, "supplyCap", required=False, default="0"))
+    # Optional fields from reserve (0 = no cap in Aave)
+    borrow_cap = Decimal(_get_field(reserve, "borrowCap", required=False, default="0"))
+    supply_cap = Decimal(_get_field(reserve, "supplyCap", required=False, default="0"))
 
-    # Optional: price data may not be available
+    # Optional: price data
+    price_usd: Decimal | None = None
+    price_eth: Decimal | None = None
     supplied_value_usd = None
     borrowed_value_usd = None
+
     price_in_usd_raw = _get_field(item, "priceInUsd", required=False)
     if price_in_usd_raw:
-        price_in_usd = _to_decimal(price_in_usd_raw, WAD)
-        if price_in_usd > 0:
-            supplied_value_usd = supplied_amount * price_in_usd
-            borrowed_value_usd = borrowed_amount * price_in_usd
+        price_usd = _to_decimal(price_in_usd_raw, PRICE_DECIMALS)
+        if price_usd > 0:
+            supplied_value_usd = supplied_amount * price_usd
+            borrowed_value_usd = borrowed_amount * price_usd
+
+    price_in_eth_raw = _get_field(item, "priceInEth", required=False)
+    if price_in_eth_raw:
+        price_eth = _to_decimal(price_in_eth_raw, PRICE_DECIMALS)
+
+    # Optional: rate data (RAY-scaled, convert to decimal)
+    variable_borrow_rate: Decimal | None = None
+    liquidity_rate: Decimal | None = None
+    stable_borrow_rate: Decimal | None = None
+
+    variable_borrow_rate_raw = _get_field(item, "variableBorrowRate", required=False)
+    if variable_borrow_rate_raw:
+        variable_borrow_rate = _to_decimal(variable_borrow_rate_raw, RAY)
+
+    liquidity_rate_raw = _get_field(item, "liquidityRate", required=False)
+    if liquidity_rate_raw:
+        liquidity_rate = _to_decimal(liquidity_rate_raw, RAY)
+
+    stable_borrow_rate_raw = _get_field(item, "stableBorrowRate", required=False)
+    if stable_borrow_rate_raw:
+        stable_borrow_rate = _to_decimal(stable_borrow_rate_raw, RAY)
+
+    # Optional: available liquidity
+    available_liquidity: Decimal | None = None
+    available_liquidity_raw = _get_field(item, "availableLiquidity", required=False)
+    if available_liquidity_raw:
+        available_liquidity = _to_decimal(available_liquidity_raw, asset_scale)
 
     utilization = ReserveSnapshot.compute_utilization(supplied_amount, borrowed_amount)
 
@@ -156,6 +216,13 @@ def transform_history_item_to_snapshot(
         borrowed_value_usd=borrowed_value_usd,
         utilization=utilization,
         rate_model=rate_model,
+        variable_borrow_rate=variable_borrow_rate,
+        liquidity_rate=liquidity_rate,
+        stable_borrow_rate=stable_borrow_rate,
+        price_usd=price_usd,
+        price_eth=price_eth,
+        available_liquidity=available_liquidity,
+        raw_timestamp=timestamp,
     )
 
 

@@ -20,6 +20,7 @@ def test_config():
                 chain_id="ethereum",
                 name="Ethereum",
                 subgraph_url="https://mock.subgraph.com",
+                pool_address="0xpool",
             ),
         ],
         markets=[
@@ -38,6 +39,7 @@ def test_config():
 
 @pytest.fixture
 def mock_reserve_response():
+    """Mock response matching actual Aave V3 subgraph format with flat rate fields."""
     return {
         "data": {
             "reserves": [
@@ -53,12 +55,11 @@ def mock_reserve_response():
                     "borrowCap": "100000",
                     "supplyCap": "200000",
                     "price": {"priceInEth": "1000000000000000000"},
-                    "reserveInterestRateStrategy": {
-                        "optimalUsageRatio": "800000000000000000000000000",
-                        "baseVariableBorrowRate": "0",
-                        "variableRateSlope1": "40000000000000000000000000",
-                        "variableRateSlope2": "750000000000000000000000000",
-                    },
+                    # Flat rate model fields (as returned by subgraph)
+                    "optimalUtilisationRate": "800000000000000000000000000",
+                    "baseVariableBorrowRate": "0",
+                    "variableRateSlope1": "40000000000000000000000000",
+                    "variableRateSlope2": "750000000000000000000000000",
                     "lastUpdateTimestamp": 1700000000,
                 },
                 {
@@ -73,12 +74,11 @@ def mock_reserve_response():
                     "borrowCap": "50000000",
                     "supplyCap": "100000000",
                     "price": {"priceInEth": "500000000000000"},
-                    "reserveInterestRateStrategy": {
-                        "optimalUsageRatio": "900000000000000000000000000",
-                        "baseVariableBorrowRate": "0",
-                        "variableRateSlope1": "40000000000000000000000000",
-                        "variableRateSlope2": "600000000000000000000000000",
-                    },
+                    # Flat rate model fields (as returned by subgraph)
+                    "optimalUtilisationRate": "900000000000000000000000000",
+                    "baseVariableBorrowRate": "0",
+                    "variableRateSlope1": "40000000000000000000000000",
+                    "variableRateSlope2": "600000000000000000000000000",
                     "lastUpdateTimestamp": 1700000000,
                 },
             ]
@@ -166,3 +166,75 @@ class TestAaveV3Client:
         result = client._dedupe_by_hour(duplicated)
 
         assert len(result) == 2
+
+    def test_fetch_reserve_history_returns_snapshots(
+        self, test_config, mock_reserve_response
+    ):
+        """Test that fetch_reserve_history fetches current reserves for rate model."""
+        mock_fetcher = MockAaveV3Fetcher()
+        mock_fetcher.set_mock_response("reserves", mock_reserve_response)
+        mock_fetcher.set_mock_response(
+            "history",
+            {
+                "data": {
+                    "reserveParamsHistoryItems": [
+                        {
+                            "id": "item1",
+                            "reserve": {
+                                "underlyingAsset": "0xweth",
+                                "symbol": "WETH",
+                                "decimals": 18,
+                            },
+                            "totalLiquidity": "1000000000000000000000",
+                            "availableLiquidity": "600000000000000000000",
+                            "totalCurrentVariableDebt": "300000000000000000000",
+                            "totalPrincipalStableDebt": "100000000000000000000",
+                            "borrowCap": "100000",
+                            "supplyCap": "200000",
+                            "priceInEth": "100000000",
+                            "priceInUsd": "200000000000",
+                            "timestamp": 1700000000,
+                        },
+                    ]
+                }
+            },
+        )
+
+        def fetcher_factory(url):
+            return mock_fetcher
+
+        client = AaveV3Client(test_config, fetcher_factory=fetcher_factory)
+        market = test_config.markets[0]
+
+        snapshots = client.fetch_reserve_history("ethereum", market, 1699990000)
+
+        # Should have fetched reserves first, then history for each asset
+        assert len(mock_fetcher.call_history) >= 2
+        assert mock_fetcher.call_history[0][0] == "fetch_reserves"
+
+    def test_fetch_reserve_history_uses_pool_address_for_reserve_id(
+        self, test_config, mock_reserve_response
+    ):
+        """Test that reserve_id is constructed using pool_address from config."""
+        mock_fetcher = MockAaveV3Fetcher()
+        mock_fetcher.set_mock_response("reserves", mock_reserve_response)
+        mock_fetcher.set_mock_response(
+            "history", {"data": {"reserveParamsHistoryItems": []}}
+        )
+
+        def fetcher_factory(url):
+            return mock_fetcher
+
+        client = AaveV3Client(test_config, fetcher_factory=fetcher_factory)
+        market = test_config.markets[0]
+
+        client.fetch_reserve_history("ethereum", market, 1699990000)
+
+        # Find history calls and check reserve_id format
+        history_calls = [c for c in mock_fetcher.call_history if c[0] == "fetch_reserve_history"]
+        assert len(history_calls) == 2  # One for each asset (WETH, USDC)
+
+        # Reserve ID should be: asset_address + pool_address
+        reserve_ids = [c[1]["reserve_id"] for c in history_calls]
+        assert "0xweth0xpool" in reserve_ids
+        assert "0xusdc0xpool" in reserve_ids

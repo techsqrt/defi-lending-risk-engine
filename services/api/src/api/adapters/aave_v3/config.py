@@ -9,6 +9,7 @@ class ChainSubgraphConfig(BaseModel):
     chain_id: str
     name: str
     subgraph_url: str
+    pool_address: str  # Aave V3 Pool contract address (for reserve_id in subgraph)
 
     def get_url(self) -> str:
         """Return URL with API key substituted."""
@@ -58,11 +59,13 @@ def get_default_config() -> AaveV3Config:
                 chain_id="ethereum",
                 name="Ethereum Mainnet",
                 subgraph_url="https://gateway.thegraph.com/api/{api_key}/subgraphs/id/Cd2gEDVeqnjBn1hSeqFMitw8Q1iiyV9FYUZkLNRcL87g",
+                pool_address="0x2f39d218133afab8f2b819b1066c7e434ad94e9e",  # PoolAddressesProvider
             ),
             ChainSubgraphConfig(
                 chain_id="base",
                 name="Base",
                 subgraph_url="https://gateway.thegraph.com/api/{api_key}/subgraphs/id/GQFbb95cE6d8mV989mL5figjaGaKCQB3xqYrr1bRyXqF",
+                pool_address="0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",  # PoolAddressesProvider
             ),
         ],
         markets=[
