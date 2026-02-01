@@ -18,6 +18,11 @@ app.add_middleware(
 app.include_router(api_router)
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"service": "aave-risk-monitor-api", "docs": "/docs"}
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
