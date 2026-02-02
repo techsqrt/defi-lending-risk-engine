@@ -42,25 +42,6 @@ function HeroSection() {
         overflow: 'hidden',
       }}
     >
-      {/* Demo badge */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '16px',
-          right: '16px',
-          background: 'rgba(255, 193, 7, 0.9)',
-          color: '#000',
-          padding: '4px 12px',
-          borderRadius: '12px',
-          fontSize: '11px',
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-        }}
-      >
-        Demo Only
-      </div>
-
       <h1
         style={{
           fontSize: '2.5rem',
