@@ -228,5 +228,5 @@ class TestConstants:
     def test_event_types_contains_all_six(self):
         assert set(EVENT_TYPES) == {"supply", "withdraw", "borrow", "repay", "liquidation", "flashloan"}
 
-    def test_first_event_time_is_feb_1_2025(self):
-        assert FIRST_EVENT_TIME == 1738368000
+    def test_first_event_time_is_feb_1_2026(self):
+        assert FIRST_EVENT_TIME == 1769904000
