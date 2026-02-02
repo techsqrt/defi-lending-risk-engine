@@ -46,4 +46,4 @@ yarn-debug.log*
 yarn-error.log*
 
 # Poetry
-poetry.lock
+# poetry.lock should be committed for reproducible builds

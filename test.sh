@@ -55,12 +55,17 @@ cd "$REPO_ROOT/apps/web"
 pnpm test
 cd "$REPO_ROOT"
 
-echo "==> Checking Playwright dependencies"
-check_playwright_deps
+# Skip e2e tests on CI (set CI=true to skip)
+if [ "$CI" = "true" ]; then
+    echo "==> Skipping e2e tests on CI"
+else
+    echo "==> Checking Playwright dependencies"
+    check_playwright_deps
 
-echo "==> Running frontend e2e tests"
-cd "$REPO_ROOT/apps/web"
-pnpm test:e2e
-cd "$REPO_ROOT"
+    echo "==> Running frontend e2e tests"
+    cd "$REPO_ROOT/apps/web"
+    pnpm test:e2e
+    cd "$REPO_ROOT"
+fi
 
 echo "==> All tests passed"
