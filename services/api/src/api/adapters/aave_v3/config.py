@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 SUBGRAPH_API_KEY = os.environ.get("SUBGRAPH_API_KEY", "")
 
 # Feb 1, 2026 00:00:00 UTC - start time for event ingestion
-FIRST_EVENT_TIME = 1738368000
+FIRST_EVENT_TIME = 1769904000
 
 # Event types to ingest
 EVENT_TYPES = ["supply", "withdraw", "borrow", "repay", "liquidation", "flashloan"]
