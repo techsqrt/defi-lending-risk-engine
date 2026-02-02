@@ -82,3 +82,28 @@ class ReserveSnapshot:
         if supplied == 0:
             return Decimal("0")
         return borrowed / supplied
+
+
+@dataclass
+class ProtocolEvent:
+    """A protocol event (supply, withdraw, borrow, repay, liquidation, flashloan)."""
+
+    id: str  # subgraph event ID
+    chain_id: str
+    event_type: str  # 'supply', 'withdraw', 'borrow', 'repay', 'liquidation', 'flashloan'
+    timestamp: int
+    # User info
+    user_address: str  # main user (depositor/borrower/liquidated)
+    liquidator_address: Optional[str]  # only for liquidations
+    # Asset info (primary)
+    asset_address: str
+    asset_symbol: str
+    asset_decimals: int
+    amount: Decimal  # raw amount in smallest unit
+    amount_usd: Optional[Decimal]  # USD value at time of event
+    # Liquidation-specific (collateral side)
+    collateral_asset_address: Optional[str] = None
+    collateral_asset_symbol: Optional[str] = None
+    collateral_amount: Optional[Decimal] = None
+    # Borrow-specific
+    borrow_rate: Optional[Decimal] = None  # RAY-scaled rate

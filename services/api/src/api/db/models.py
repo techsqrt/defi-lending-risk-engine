@@ -1,7 +1,9 @@
 from sqlalchemy import (
+    BigInteger,
     Column,
     DateTime,
     Index,
+    Integer,
     MetaData,
     Numeric,
     String,
@@ -67,4 +69,33 @@ reserve_rate_model_params = Table(
         name="uq_rate_model_key"
     ),
     Index("ix_rate_model_asset", "chain_id", "market_id", "asset_address"),
+)
+
+protocol_events = Table(
+    "protocol_events",
+    metadata,
+    Column("id", String(200), primary_key=True),
+    Column("chain_id", String(50), nullable=False),
+    Column("event_type", String(20), nullable=False),
+    Column("timestamp", BigInteger, nullable=False),
+    # User info
+    Column("user_address", String(100), nullable=False),
+    Column("liquidator_address", String(100), nullable=True),
+    # Asset info (primary)
+    Column("asset_address", String(100), nullable=False),
+    Column("asset_symbol", String(20), nullable=False),
+    Column("asset_decimals", Integer, nullable=False),
+    Column("amount", Numeric(78, 0), nullable=False),
+    Column("amount_usd", Numeric(38, 18), nullable=True),
+    # Liquidation-specific (collateral side)
+    Column("collateral_asset_address", String(100), nullable=True),
+    Column("collateral_asset_symbol", String(20), nullable=True),
+    Column("collateral_amount", Numeric(78, 0), nullable=True),
+    # Borrow-specific
+    Column("borrow_rate", Numeric(38, 0), nullable=True),
+    # Timestamps
+    Column("created_at", DateTime(timezone=True), nullable=True),
+    Index("idx_events_cursor", "chain_id", "event_type", "timestamp"),
+    Index("idx_events_user", "user_address", "timestamp"),
+    Index("idx_events_asset", "asset_address", "timestamp"),
 )
