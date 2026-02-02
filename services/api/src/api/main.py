@@ -1,11 +1,22 @@
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from services.api.src.api.routes import api_router
 
-app = FastAPI(title="Aave Risk Monitor API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run migrations on startup."""
+    if os.getenv("RUN_MIGRATIONS", "true").lower() == "true":
+        from services.api.src.api.db.migrate import run_migrations
+        run_migrations()
+    yield
+
+
+app = FastAPI(title="Aave Risk Monitor API", lifespan=lifespan)
 
 # CORS for frontend - allow localhost and Vercel deployments
 cors_origins = [
