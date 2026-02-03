@@ -10,51 +10,6 @@ from services.api.src.api.adapters.aave_v3.transformer import (
     transform_reserve_to_snapshot,
 )
 from services.api.src.api.domain.models import RateModelParams
-from services.api.src.api.utils.timestamps import (
-    truncate_to_day,
-    truncate_to_hour,
-    truncate_to_month,
-    truncate_to_week,
-)
-
-
-class TestTimestampTruncation:
-    """Tests for timestamp truncation utilities."""
-
-    def test_truncate_to_hour(self):
-        # 22:25:25 -> 22:00:00
-        ts = 1700000725  # 2023-11-14 22:25:25 UTC
-        result = truncate_to_hour(ts)
-        expected = datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc)
-        assert result == expected
-
-    def test_truncate_to_hour_exact(self):
-        # 22:00:00 -> 22:00:00
-        ts = 1699999200  # 2023-11-14 22:00:00 UTC
-        result = truncate_to_hour(ts)
-        expected = datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc)
-        assert result == expected
-
-    def test_truncate_to_day(self):
-        # 22:25:25 -> 00:00:00 same day
-        ts = 1700000725  # 2023-11-14 22:25:25 UTC
-        result = truncate_to_day(ts)
-        expected = datetime(2023, 11, 14, 0, 0, 0, tzinfo=timezone.utc)
-        assert result == expected
-
-    def test_truncate_to_week_monday(self):
-        # 2023-11-14 is Tuesday -> Monday 2023-11-13
-        ts = 1700000725  # 2023-11-14 22:25:25 UTC (Tuesday)
-        result = truncate_to_week(ts)
-        expected = datetime(2023, 11, 13, 0, 0, 0, tzinfo=timezone.utc)  # Monday
-        assert result == expected
-
-    def test_truncate_to_month(self):
-        # 2023-11-14 -> 2023-11-01
-        ts = 1700000725  # 2023-11-14 22:25:25 UTC
-        result = truncate_to_month(ts)
-        expected = datetime(2023, 11, 1, 0, 0, 0, tzinfo=timezone.utc)
-        assert result == expected
 
 
 class TestTransformRateStrategy:

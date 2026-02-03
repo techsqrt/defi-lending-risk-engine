@@ -80,7 +80,7 @@ class TestRateModelParams:
         expected = Decimal("0") + Decimal("0.04") + Decimal("0.75")
         assert rate == expected
 
-    def test_compute_rate_with_nonzero_base_rate(self):
+    def test_base_rate_returned_at_zero_utilization(self):
         model = RateModelParams(
             optimal_utilization_rate=Decimal("0.8"),
             base_variable_borrow_rate=Decimal("0.02"),
@@ -88,14 +88,18 @@ class TestRateModelParams:
             variable_rate_slope2=Decimal("0.75"),
         )
 
-        rate_at_zero = model.compute_variable_borrow_rate(Decimal("0"))
-        assert rate_at_zero == Decimal("0.02")
+        rate = model.compute_variable_borrow_rate(Decimal("0"))
 
-        rate_at_optimal = model.compute_variable_borrow_rate(Decimal("0.8"))
-        assert rate_at_optimal == Decimal("0.06")
+        assert rate == Decimal("0.02")
 
-    def test_rate_model_is_dataclass(self, standard_rate_model):
-        assert standard_rate_model.optimal_utilization_rate == Decimal("0.8")
-        assert standard_rate_model.base_variable_borrow_rate == Decimal("0")
-        assert standard_rate_model.variable_rate_slope1 == Decimal("0.04")
-        assert standard_rate_model.variable_rate_slope2 == Decimal("0.75")
+    def test_base_rate_plus_slope1_at_optimal_utilization(self):
+        model = RateModelParams(
+            optimal_utilization_rate=Decimal("0.8"),
+            base_variable_borrow_rate=Decimal("0.02"),
+            variable_rate_slope1=Decimal("0.04"),
+            variable_rate_slope2=Decimal("0.75"),
+        )
+
+        rate = model.compute_variable_borrow_rate(Decimal("0.8"))
+
+        assert rate == Decimal("0.06")

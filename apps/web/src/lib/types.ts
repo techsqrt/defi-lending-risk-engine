@@ -120,7 +120,7 @@ export interface DebugEventData {
 export interface DebugEventsResponse {
   chain_id: string;
   asset_address: string;
-  event_type_filter: string | null;
+  event_type_filter: string[] | null;
   total_matching_events: number;
   latest: DebugEventData[];
   earliest: DebugEventData[];

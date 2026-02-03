@@ -164,7 +164,8 @@ export default function AssetDetailsPage() {
   const [debugSnapshots, setDebugSnapshots] = useState<DebugSnapshotsResponse | null>(null);
   const [debugEvents, setDebugEvents] = useState<DebugEventsResponse | null>(null);
   const [debugStats, setDebugStats] = useState<DebugStatsResponse | null>(null);
-  const [eventTypeFilter, setEventTypeFilter] = useState<string>('');
+  const ALL_EVENT_TYPES = ['supply', 'withdraw', 'borrow', 'repay', 'liquidation', 'flashloan'];
+  const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>(ALL_EVENT_TYPES);
   const [eventLimitFilter, setEventLimitFilter] = useState<number>(10);
 
   useEffect(() => {
@@ -193,11 +194,13 @@ export default function AssetDetailsPage() {
   // Load debug events when panel opens or filters change
   useEffect(() => {
     if (showEventsDebug) {
-      fetchDebugEvents(chainId, assetAddress, eventTypeFilter || undefined, eventLimitFilter)
+      // If all types selected, pass undefined (no filter) for efficiency
+      const typesToFetch = selectedEventTypes.length === ALL_EVENT_TYPES.length ? undefined : selectedEventTypes;
+      fetchDebugEvents(chainId, assetAddress, typesToFetch, eventLimitFilter)
         .then(setDebugEvents)
         .catch(console.error);
     }
-  }, [showEventsDebug, chainId, assetAddress, eventTypeFilter, eventLimitFilter]);
+  }, [showEventsDebug, chainId, assetAddress, selectedEventTypes, eventLimitFilter]);
 
   // Load debug stats when panel opens
   useEffect(() => {
@@ -240,33 +243,47 @@ export default function AssetDetailsPage() {
   const periodConfig = getPeriodConfig(timePeriod);
   const isDaily = periodConfig.granularity === 'day';
 
-  // Build chart data with smart axis labels
+  // Format date/time in UTC
+  const formatUTCDate = (date: Date): string => {
+    const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    const day = date.getUTCDate();
+    return `${month} ${day}`;
+  };
+
+  const formatUTCTime = (date: Date): string => {
+    const hours = date.getUTCHours();
+    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  // Build chart data with smart axis labels (all in UTC)
   const chartData: ChartDataPoint[] = history.snapshots.map((s, index) => {
     const date = new Date(s.timestamp_hour);
     const prevDate = index > 0 ? new Date(history.snapshots[index - 1].timestamp_hour) : null;
 
-    // For hourly data: show date at midnight or when day changes, otherwise just time
-    // For daily data: show "Feb 2", "Feb 3", etc.
+    // For hourly data: show date when day changes, otherwise just time
+    // For daily data: show "Feb 2, 12:00 AM" with time for clarity
     let timeLabel: string;
     if (isDaily) {
-      timeLabel = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      // Daily view: show date + midnight time for clarity
+      timeLabel = `${formatUTCDate(date)}, 12:00 AM`;
     } else {
-      const hour = date.getHours();
-      const isNewDay = !prevDate || prevDate.getDate() !== date.getDate();
+      const isNewDay = !prevDate || prevDate.getUTCDate() !== date.getUTCDate();
 
-      if (isNewDay || hour === 0) {
-        // Show date + time at midnight or day change: "Feb 2, 1:00 AM"
-        timeLabel = date.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
-          ', ' + date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+      if (isNewDay) {
+        // Show date + time when day changes: "Feb 2, 1:00 AM"
+        timeLabel = `${formatUTCDate(date)}, ${formatUTCTime(date)}`;
       } else {
         // Show just time for other hours: "1:00 AM"
-        timeLabel = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+        timeLabel = formatUTCTime(date);
       }
     }
 
     const fullTimeLabel = isDaily
-      ? date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-      : date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+      ? `${date.toLocaleString('en-US', { weekday: 'short', timeZone: 'UTC' })}, ${formatUTCDate(date)}, ${date.getUTCFullYear()} (UTC)`
+      : `${formatUTCDate(date)}, ${formatUTCTime(date)} UTC`;
 
     return {
       timestamp: s.timestamp_hour,
@@ -292,16 +309,28 @@ export default function AssetDetailsPage() {
     : null;
   const nextSnapshotTime = getNextSnapshotTime();
 
+  // Format snapshot times in UTC
+  const formatSnapshotTimeUTC = (date: Date): string => {
+    const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    const day = date.getUTCDate();
+    const hours = date.getUTCHours().toString().padStart(2, '0');
+    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+    return `${month} ${day}, ${hours}:${minutes}`;
+  };
+
+  const formatNextSnapshotUTC = (date: Date): string => {
+    const hours = date.getUTCHours().toString().padStart(2, '0');
+    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
+
   return (
     <main style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
       <Link href="/" style={{ color: '#0066cc', display: 'block', marginBottom: '16px' }}>
         &larr; Back to Overview
       </Link>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-        <h1 style={{ margin: 0 }}>{history.asset_symbol}</h1>
-        <TimePeriodSelector selected={timePeriod} onChange={setTimePeriod} />
-      </div>
+      <h1 style={{ marginBottom: '8px' }}>{history.asset_symbol}</h1>
       <p style={{ color: '#666', marginBottom: '16px' }}>
         {chainId} / {marketId}
       </p>
@@ -311,7 +340,7 @@ export default function AssetDetailsPage() {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
         gap: '12px',
-        marginBottom: '24px',
+        marginBottom: '16px',
         padding: '16px',
         background: '#f8fafc',
         borderRadius: '8px',
@@ -321,7 +350,7 @@ export default function AssetDetailsPage() {
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Latest Snapshot</div>
           <div style={{ fontSize: '14px', fontWeight: '600' }}>
             {latestSnapshotTime
-              ? `${latestSnapshotTime.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} (${formatRelativeTime(latestSnapshotTime)})`
+              ? `${formatSnapshotTimeUTC(latestSnapshotTime)} UTC (${formatRelativeTime(latestSnapshotTime)})`
               : 'N/A'
             }
           </div>
@@ -329,7 +358,7 @@ export default function AssetDetailsPage() {
         <div>
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Next Snapshot</div>
           <div style={{ fontSize: '14px', fontWeight: '600' }}>
-            {nextSnapshotTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({formatTimeUntil(nextSnapshotTime)})
+            {formatNextSnapshotUTC(nextSnapshotTime)} UTC ({formatTimeUntil(nextSnapshotTime)})
           </div>
         </div>
         <div>
@@ -340,9 +369,17 @@ export default function AssetDetailsPage() {
         </div>
       </div>
 
+      {/* Time Period Selector + UTC note */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+        <div style={{ fontSize: '12px', color: '#64748b' }}>
+          All times are in UTC
+        </div>
+        <TimePeriodSelector selected={timePeriod} onChange={setTimePeriod} />
+      </div>
+
       <div style={{ display: 'grid', gap: '24px' }}>
         {/* Utilization Chart */}
-        <ChartSection title={`Utilization (${timePeriod})`}>
+        <ChartSection title="Utilization">
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
@@ -391,7 +428,7 @@ export default function AssetDetailsPage() {
         </ChartSection>
 
         {/* Supply & Borrow Chart */}
-        <ChartSection title={`Supply & Borrow Value (${timePeriod})`}>
+        <ChartSection title="Supply & Borrow Value">
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
@@ -431,7 +468,7 @@ export default function AssetDetailsPage() {
         </ChartSection>
 
         {/* Interest Rates Chart */}
-        <ChartSection title={`Interest Rates (${timePeriod})`}>
+        <ChartSection title="Interest Rates">
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
@@ -515,25 +552,30 @@ export default function AssetDetailsPage() {
         >
           <div style={{ display: 'grid', gap: '16px' }}>
             {/* Filters */}
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
               <div>
-                <label style={{ fontSize: '12px', color: '#64748b', marginRight: '8px' }}>Event Type:</label>
-                <select
-                  value={eventTypeFilter}
-                  onChange={(e) => setEventTypeFilter(e.target.value)}
-                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                >
-                  <option value="">All</option>
-                  <option value="supply">Supply</option>
-                  <option value="withdraw">Withdraw</option>
-                  <option value="borrow">Borrow</option>
-                  <option value="repay">Repay</option>
-                  <option value="liquidation">Liquidation</option>
-                  <option value="flashloan">Flashloan</option>
-                </select>
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>Event Types:</div>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  {ALL_EVENT_TYPES.map((type) => (
+                    <label key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedEventTypes.includes(type)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedEventTypes([...selectedEventTypes, type]);
+                          } else {
+                            setSelectedEventTypes(selectedEventTypes.filter((t) => t !== type));
+                          }
+                        }}
+                      />
+                      {type}
+                    </label>
+                  ))}
+                </div>
               </div>
               <div>
-                <label style={{ fontSize: '12px', color: '#64748b', marginRight: '8px' }}>Latest count:</label>
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>Latest count:</div>
                 <select
                   value={eventLimitFilter}
                   onChange={(e) => setEventLimitFilter(Number(e.target.value))}
@@ -552,7 +594,9 @@ export default function AssetDetailsPage() {
               <>
                 <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>
                   Matching events: <strong>{debugEvents.total_matching_events.toLocaleString()}</strong>
-                  {debugEvents.event_type_filter && <span> (filtered: {debugEvents.event_type_filter})</span>}
+                  {debugEvents.event_type_filter && debugEvents.event_type_filter.length > 0 && (
+                    <span> (filtered: {debugEvents.event_type_filter.join(', ')})</span>
+                  )}
                 </div>
                 <div>
                   <div style={{ fontWeight: '600', marginBottom: '8px' }}>Latest {debugEvents.latest.length} Events:</div>
@@ -597,7 +641,7 @@ export default function AssetDetailsPage() {
                     <div style={{ color: '#64748b', fontSize: '11px' }}>First Event</div>
                     <div style={{ fontWeight: '600' }}>
                       {debugStats.overall.min_timestamp
-                        ? new Date(debugStats.overall.min_timestamp * 1000).toLocaleString()
+                        ? new Date(debugStats.overall.min_timestamp * 1000).toLocaleString('en-US', { timeZone: 'UTC' }) + ' UTC'
                         : 'N/A'}
                     </div>
                   </div>
@@ -605,7 +649,7 @@ export default function AssetDetailsPage() {
                     <div style={{ color: '#64748b', fontSize: '11px' }}>Last Event</div>
                     <div style={{ fontWeight: '600' }}>
                       {debugStats.overall.max_timestamp
-                        ? new Date(debugStats.overall.max_timestamp * 1000).toLocaleString()
+                        ? new Date(debugStats.overall.max_timestamp * 1000).toLocaleString('en-US', { timeZone: 'UTC' }) + ' UTC'
                         : 'N/A'}
                     </div>
                   </div>
@@ -644,10 +688,10 @@ export default function AssetDetailsPage() {
                               {formatUSDCompact(avgUsd)}
                             </td>
                             <td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #eee', fontSize: '11px' }}>
-                              {new Date(stats.min_timestamp * 1000).toLocaleDateString()}
+                              {new Date(stats.min_timestamp * 1000).toLocaleDateString('en-US', { timeZone: 'UTC' })}
                             </td>
                             <td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #eee', fontSize: '11px' }}>
-                              {new Date(stats.max_timestamp * 1000).toLocaleDateString()}
+                              {new Date(stats.max_timestamp * 1000).toLocaleDateString('en-US', { timeZone: 'UTC' })}
                             </td>
                           </tr>
                         );
@@ -776,12 +820,13 @@ function EventsTable({ events }: { events: DebugEventsResponse['latest'] }) {
                 </span>
               </td>
               <td style={{ padding: '6px 8px', borderBottom: '1px solid #eee' }}>
-                {new Date(event.timestamp * 1000).toLocaleString([], {
+                {new Date(event.timestamp * 1000).toLocaleString('en-US', {
                   month: 'short',
                   day: 'numeric',
                   hour: '2-digit',
                   minute: '2-digit',
-                })}
+                  timeZone: 'UTC',
+                })} UTC
               </td>
               <td style={{ padding: '6px 8px', borderBottom: '1px solid #eee', fontFamily: 'monospace', fontSize: '10px' }}>
                 {event.user_address.slice(0, 6)}...{event.user_address.slice(-4)}
