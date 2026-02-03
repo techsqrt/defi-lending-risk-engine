@@ -16,8 +16,21 @@ import {
   ReferenceDot,
   TooltipProps,
 } from 'recharts';
-import { fetchMarketHistory, fetchMarketLatest } from '@/lib/api';
-import type { MarketHistory, LatestRawResponse, RateModel } from '@/lib/types';
+import {
+  fetchMarketHistory,
+  fetchMarketLatest,
+  fetchDebugSnapshots,
+  fetchDebugEvents,
+  fetchDebugStats,
+} from '@/lib/api';
+import type {
+  MarketHistory,
+  LatestRawResponse,
+  RateModel,
+  DebugSnapshotsResponse,
+  DebugEventsResponse,
+  DebugStatsResponse,
+} from '@/lib/types';
 import { TimePeriodSelector, TimePeriod, getPeriodConfig } from '@/app/components/TimePeriodSelector';
 
 interface ChartDataPoint {
@@ -142,8 +155,17 @@ export default function AssetDetailsPage() {
   const [latest, setLatest] = useState<LatestRawResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showRawJson, setShowRawJson] = useState(false);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('24H');
+
+  // Debug panel states
+  const [showSnapshotsDebug, setShowSnapshotsDebug] = useState(false);
+  const [showEventsDebug, setShowEventsDebug] = useState(false);
+  const [showStatsDebug, setShowStatsDebug] = useState(false);
+  const [debugSnapshots, setDebugSnapshots] = useState<DebugSnapshotsResponse | null>(null);
+  const [debugEvents, setDebugEvents] = useState<DebugEventsResponse | null>(null);
+  const [debugStats, setDebugStats] = useState<DebugStatsResponse | null>(null);
+  const [eventTypeFilter, setEventTypeFilter] = useState<string>('');
+  const [eventLimitFilter, setEventLimitFilter] = useState<number>(10);
 
   useEffect(() => {
     setLoading(true);
@@ -158,6 +180,33 @@ export default function AssetDetailsPage() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [chainId, marketId, assetAddress, timePeriod]);
+
+  // Load debug snapshots when panel opens
+  useEffect(() => {
+    if (showSnapshotsDebug && !debugSnapshots) {
+      fetchDebugSnapshots(chainId, assetAddress)
+        .then(setDebugSnapshots)
+        .catch(console.error);
+    }
+  }, [showSnapshotsDebug, chainId, assetAddress, debugSnapshots]);
+
+  // Load debug events when panel opens or filters change
+  useEffect(() => {
+    if (showEventsDebug) {
+      fetchDebugEvents(chainId, assetAddress, eventTypeFilter || undefined, eventLimitFilter)
+        .then(setDebugEvents)
+        .catch(console.error);
+    }
+  }, [showEventsDebug, chainId, assetAddress, eventTypeFilter, eventLimitFilter]);
+
+  // Load debug stats when panel opens
+  useEffect(() => {
+    if (showStatsDebug && !debugStats) {
+      fetchDebugStats(chainId, assetAddress)
+        .then(setDebugStats)
+        .catch(console.error);
+    }
+  }, [showStatsDebug, chainId, assetAddress, debugStats]);
 
   if (loading) {
     return (
@@ -281,12 +330,6 @@ export default function AssetDetailsPage() {
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Next Snapshot</div>
           <div style={{ fontSize: '14px', fontWeight: '600' }}>
             {nextSnapshotTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({formatTimeUntil(nextSnapshotTime)})
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Data Points</div>
-          <div style={{ fontSize: '14px', fontWeight: '600' }}>
-            {history.snapshots.length} ({periodConfig.granularity}ly)
           </div>
         </div>
         <div>
@@ -435,38 +478,322 @@ export default function AssetDetailsPage() {
           />
         )}
 
-        {/* Raw JSON Debug Panel */}
-        <div style={{ border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden' }}>
-          <button
-            onClick={() => setShowRawJson(!showRawJson)}
-            style={{
-              width: '100%',
-              padding: '12px 16px',
-              background: '#f5f5f5',
-              border: 'none',
-              cursor: 'pointer',
-              textAlign: 'left',
-              fontWeight: 'bold',
-            }}
-          >
-            {showRawJson ? '▼' : '▶'} Raw JSON (Debug)
-          </button>
-          {showRawJson && (
-            <pre style={{
-              padding: '16px',
-              background: '#1e1e1e',
-              color: '#d4d4d4',
-              overflow: 'auto',
-              maxHeight: '400px',
-              margin: 0,
-              fontSize: '12px',
-            }}>
-              {JSON.stringify(latest?.snapshot ?? {}, null, 2)}
-            </pre>
+        {/* Debug Panel 1: Snapshots */}
+        <DebugPanel
+          title="Debug: Snapshots (Newest & Oldest)"
+          isOpen={showSnapshotsDebug}
+          onToggle={() => setShowSnapshotsDebug(!showSnapshotsDebug)}
+        >
+          {debugSnapshots ? (
+            <div style={{ display: 'grid', gap: '16px' }}>
+              <div style={{ fontSize: '13px', color: '#64748b' }}>
+                Total snapshots: <strong>{debugSnapshots.total_snapshots}</strong>
+              </div>
+              <div>
+                <div style={{ fontWeight: '600', marginBottom: '8px' }}>Newest Snapshot:</div>
+                <pre style={{ background: '#f8fafc', padding: '12px', borderRadius: '4px', fontSize: '11px', overflow: 'auto', maxHeight: '200px' }}>
+                  {JSON.stringify(debugSnapshots.newest, null, 2)}
+                </pre>
+              </div>
+              <div>
+                <div style={{ fontWeight: '600', marginBottom: '8px' }}>Oldest Snapshot:</div>
+                <pre style={{ background: '#f8fafc', padding: '12px', borderRadius: '4px', fontSize: '11px', overflow: 'auto', maxHeight: '200px' }}>
+                  {JSON.stringify(debugSnapshots.oldest, null, 2)}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <div>Loading...</div>
           )}
-        </div>
+        </DebugPanel>
+
+        {/* Debug Panel 2: Events */}
+        <DebugPanel
+          title="Debug: Events (Latest & Earliest)"
+          isOpen={showEventsDebug}
+          onToggle={() => setShowEventsDebug(!showEventsDebug)}
+        >
+          <div style={{ display: 'grid', gap: '16px' }}>
+            {/* Filters */}
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#64748b', marginRight: '8px' }}>Event Type:</label>
+                <select
+                  value={eventTypeFilter}
+                  onChange={(e) => setEventTypeFilter(e.target.value)}
+                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                >
+                  <option value="">All</option>
+                  <option value="supply">Supply</option>
+                  <option value="withdraw">Withdraw</option>
+                  <option value="borrow">Borrow</option>
+                  <option value="repay">Repay</option>
+                  <option value="liquidation">Liquidation</option>
+                  <option value="flashloan">Flashloan</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '12px', color: '#64748b', marginRight: '8px' }}>Latest count:</label>
+                <select
+                  value={eventLimitFilter}
+                  onChange={(e) => setEventLimitFilter(Number(e.target.value))}
+                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                >
+                  <option value={1}>1</option>
+                  <option value={3}>3</option>
+                  <option value={10}>10</option>
+                  <option value={30}>30</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+            </div>
+
+            {debugEvents ? (
+              <>
+                <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>
+                  Matching events: <strong>{debugEvents.total_matching_events.toLocaleString()}</strong>
+                  {debugEvents.event_type_filter && <span> (filtered: {debugEvents.event_type_filter})</span>}
+                </div>
+                <div>
+                  <div style={{ fontWeight: '600', marginBottom: '8px' }}>Latest {debugEvents.latest.length} Events:</div>
+                  <EventsTable events={debugEvents.latest} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: '600', marginBottom: '8px' }}>Earliest 3 Events:</div>
+                  <EventsTable events={debugEvents.earliest} />
+                </div>
+              </>
+            ) : (
+              <div>Loading...</div>
+            )}
+          </div>
+        </DebugPanel>
+
+        {/* Debug Panel 3: Stats */}
+        <DebugPanel
+          title="Debug: Statistics"
+          isOpen={showStatsDebug}
+          onToggle={() => setShowStatsDebug(!showStatsDebug)}
+        >
+          {debugStats ? (
+            <div style={{ display: 'grid', gap: '16px' }}>
+              {/* Overall stats */}
+              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '4px' }}>
+                <div style={{ fontWeight: '600', marginBottom: '12px' }}>Overall Summary</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '13px' }}>
+                  <div>
+                    <div style={{ color: '#64748b', fontSize: '11px' }}>Total Events</div>
+                    <div style={{ fontWeight: '600', fontSize: '16px' }}>{debugStats.overall.total_events.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#64748b', fontSize: '11px' }}>Unique Users</div>
+                    <div style={{ fontWeight: '600', fontSize: '16px' }}>{debugStats.overall.total_unique_users.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#64748b', fontSize: '11px' }}>Days Covered</div>
+                    <div style={{ fontWeight: '600', fontSize: '16px' }}>{debugStats.overall.total_unique_days}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#64748b', fontSize: '11px' }}>First Event</div>
+                    <div style={{ fontWeight: '600' }}>
+                      {debugStats.overall.min_timestamp
+                        ? new Date(debugStats.overall.min_timestamp * 1000).toLocaleString()
+                        : 'N/A'}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#64748b', fontSize: '11px' }}>Last Event</div>
+                    <div style={{ fontWeight: '600' }}>
+                      {debugStats.overall.max_timestamp
+                        ? new Date(debugStats.overall.max_timestamp * 1000).toLocaleString()
+                        : 'N/A'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stats by event type */}
+              <div>
+                <div style={{ fontWeight: '600', marginBottom: '12px' }}>By Event Type</div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9' }}>
+                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Type</th>
+                        <th style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Count</th>
+                        <th style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Users</th>
+                        <th style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Total USD</th>
+                        <th style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Avg USD</th>
+                        <th style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #ddd' }}>First</th>
+                        <th style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Last</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(debugStats.by_event_type).map(([type, stats]) => {
+                        const totalUsd = parseFloat(stats.total_usd) || 0;
+                        const avgUsd = stats.count > 0 ? totalUsd / stats.count : 0;
+                        return (
+                          <tr key={type}>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #eee', fontWeight: '500' }}>{type}</td>
+                            <td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #eee' }}>{stats.count.toLocaleString()}</td>
+                            <td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #eee' }}>{stats.unique_users.toLocaleString()}</td>
+                            <td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                              {formatUSDCompact(totalUsd)}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                              {formatUSDCompact(avgUsd)}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #eee', fontSize: '11px' }}>
+                              {new Date(stats.min_timestamp * 1000).toLocaleDateString()}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #eee', fontSize: '11px' }}>
+                              {new Date(stats.max_timestamp * 1000).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Quick summary */}
+              <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '4px', border: '1px solid #bbf7d0' }}>
+                <div style={{ fontWeight: '600', marginBottom: '8px' }}>Quick Summary</div>
+                <div style={{ fontSize: '13px', display: 'grid', gap: '4px' }}>
+                  {debugStats.by_event_type.supply && (
+                    <div>
+                      Deposits: <strong>{debugStats.by_event_type.supply.count.toLocaleString()}</strong> events,
+                      <strong> {formatUSDCompact(parseFloat(debugStats.by_event_type.supply.total_usd))}</strong> total,
+                      <strong> {formatUSDCompact(parseFloat(debugStats.by_event_type.supply.total_usd) / debugStats.by_event_type.supply.count)}</strong> avg
+                    </div>
+                  )}
+                  {debugStats.by_event_type.withdraw && (
+                    <div>
+                      Withdrawals: <strong>{debugStats.by_event_type.withdraw.count.toLocaleString()}</strong> events,
+                      <strong> {formatUSDCompact(parseFloat(debugStats.by_event_type.withdraw.total_usd))}</strong> total
+                    </div>
+                  )}
+                  {debugStats.by_event_type.borrow && (
+                    <div>
+                      Borrows: <strong>{debugStats.by_event_type.borrow.count.toLocaleString()}</strong> events,
+                      <strong> {formatUSDCompact(parseFloat(debugStats.by_event_type.borrow.total_usd))}</strong> total
+                    </div>
+                  )}
+                  {debugStats.by_event_type.repay && (
+                    <div>
+                      Repays: <strong>{debugStats.by_event_type.repay.count.toLocaleString()}</strong> events,
+                      <strong> {formatUSDCompact(parseFloat(debugStats.by_event_type.repay.total_usd))}</strong> total
+                    </div>
+                  )}
+                  {debugStats.by_event_type.liquidation && (
+                    <div>
+                      Liquidations: <strong>{debugStats.by_event_type.liquidation.count.toLocaleString()}</strong> events
+                    </div>
+                  )}
+                  {debugStats.by_event_type.flashloan && (
+                    <div>
+                      Flashloans: <strong>{debugStats.by_event_type.flashloan.count.toLocaleString()}</strong> events,
+                      <strong> {formatUSDCompact(parseFloat(debugStats.by_event_type.flashloan.total_usd))}</strong> total
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>Loading...</div>
+          )}
+        </DebugPanel>
       </div>
     </main>
+  );
+}
+
+function DebugPanel({ title, isOpen, onToggle, children }: {
+  title: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden' }}>
+      <button
+        onClick={onToggle}
+        style={{
+          width: '100%',
+          padding: '12px 16px',
+          background: '#f5f5f5',
+          border: 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontWeight: 'bold',
+        }}
+      >
+        {isOpen ? '▼' : '▶'} {title}
+      </button>
+      {isOpen && (
+        <div style={{ padding: '16px' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventsTable({ events }: { events: DebugEventsResponse['latest'] }) {
+  if (events.length === 0) {
+    return <div style={{ color: '#64748b', fontSize: '13px' }}>No events found</div>;
+  }
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+        <thead>
+          <tr style={{ background: '#f1f5f9' }}>
+            <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Type</th>
+            <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Time</th>
+            <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>User</th>
+            <th style={{ padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Amount USD</th>
+          </tr>
+        </thead>
+        <tbody>
+          {events.map((event) => (
+            <tr key={event.id}>
+              <td style={{ padding: '6px 8px', borderBottom: '1px solid #eee' }}>
+                <span style={{
+                  background: event.event_type === 'supply' ? '#dcfce7' :
+                             event.event_type === 'withdraw' ? '#fef3c7' :
+                             event.event_type === 'borrow' ? '#dbeafe' :
+                             event.event_type === 'repay' ? '#f3e8ff' :
+                             event.event_type === 'liquidation' ? '#fee2e2' :
+                             '#f1f5f9',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  fontSize: '10px',
+                  fontWeight: '500',
+                }}>
+                  {event.event_type}
+                </span>
+              </td>
+              <td style={{ padding: '6px 8px', borderBottom: '1px solid #eee' }}>
+                {new Date(event.timestamp * 1000).toLocaleString([], {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </td>
+              <td style={{ padding: '6px 8px', borderBottom: '1px solid #eee', fontFamily: 'monospace', fontSize: '10px' }}>
+                {event.user_address.slice(0, 6)}...{event.user_address.slice(-4)}
+              </td>
+              <td style={{ padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                {event.amount_usd ? formatUSDCompact(parseFloat(event.amount_usd)) : 'N/A'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
