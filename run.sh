@@ -8,17 +8,6 @@ export PYTHONPATH="$REPO_ROOT"
 
 cd "$REPO_ROOT"
 
-# Parse arguments
-TRUNCATE_DB=false
-for arg in "$@"; do
-    case $arg in
-        --truncate)
-            TRUNCATE_DB=true
-            shift
-            ;;
-    esac
-done
-
 # Detect docker compose command
 if docker compose version >/dev/null 2>&1; then
     COMPOSE="docker compose"
@@ -48,54 +37,34 @@ $COMPOSE -f "$REPO_ROOT/infra/docker-compose.yml" up -d
 echo "==> Waiting for services to be healthy..."
 sleep 3
 
-# Truncate database if requested
-if [ "$TRUNCATE_DB" = true ]; then
-    echo "==> Truncating database (--truncate flag set)..."
-    PGPASSWORD=aave psql -h localhost -U aave -d aave_risk -c "TRUNCATE reserve_snapshots_hourly;" || {
-        echo "WARNING: Failed to truncate table"
+# Run ingestion if API key is set (uses cursor-based logic - safe to run always)
+if [ -n "$SUBGRAPH_API_KEY" ]; then
+    echo "==> Running data ingestion..."
+    cd "$REPO_ROOT/services/api"
+
+    # Run snapshot ingestion
+    echo "==> Ingesting reserve snapshots..."
+    poetry run python -m services.api.src.api.jobs.ingest_snapshots || {
+        echo "WARNING: Snapshot ingestion failed"
     }
-fi
 
-# Check if database has data, run backfill if empty
-echo "==> Checking database for existing data..."
-ROW_COUNT=$(PGPASSWORD=aave psql -h localhost -U aave -d aave_risk -t -c "SELECT COUNT(*) FROM reserve_snapshots_hourly;" 2>/dev/null | tr -d ' ')
+    # Run event ingestion
+    echo "==> Ingesting protocol events..."
+    poetry run python -m services.api.src.api.jobs.ingest_events --chain ethereum || {
+        echo "WARNING: Ethereum event ingestion failed"
+    }
+    poetry run python -m services.api.src.api.jobs.ingest_events --chain base || {
+        echo "WARNING: Base event ingestion failed"
+    }
 
-if [ -z "$ROW_COUNT" ]; then
-    echo "ERROR: Could not connect to database or table doesn't exist"
-    echo "Make sure postgres is running and migrations have been applied"
-    exit 1
-fi
-
-echo "==> Current row count: $ROW_COUNT"
-
-if [ "$ROW_COUNT" = "0" ]; then
-    echo "==> Database is empty, running initial backfill..."
-    if [ -z "$SUBGRAPH_API_KEY" ]; then
-        echo ""
-        echo "WARNING: SUBGRAPH_API_KEY not set - skipping backfill."
-        echo "To populate data, set the env var and re-run:"
-        echo "  SUBGRAPH_API_KEY=xxx ./run.sh"
-        echo ""
-    else
-        echo "==> Running backfill (this may take a minute)..."
-        cd "$REPO_ROOT/services/api"
-        if poetry run python -m services.api.src.api.jobs.backfill_aave_v3 --hours 24 --limit 1000; then
-            cd "$REPO_ROOT"
-            # Verify data was actually inserted
-            NEW_COUNT=$(PGPASSWORD=aave psql -h localhost -U aave -d aave_risk -t -c "SELECT COUNT(*) FROM reserve_snapshots_hourly;" | tr -d ' ')
-            echo "==> Backfill complete. Rows after backfill: $NEW_COUNT"
-            if [ "$NEW_COUNT" = "0" ]; then
-                echo "WARNING: Backfill ran but no data was inserted!"
-                echo "Check the logs above for errors."
-            fi
-        else
-            echo "ERROR: Backfill failed with exit code $?"
-            cd "$REPO_ROOT"
-            exit 1
-        fi
-    fi
+    cd "$REPO_ROOT"
+    echo "==> Ingestion complete"
 else
-    echo "==> Database has $ROW_COUNT rows, skipping backfill"
+    echo ""
+    echo "WARNING: SUBGRAPH_API_KEY not set - skipping data ingestion."
+    echo "To populate data, set the env var and re-run:"
+    echo "  SUBGRAPH_API_KEY=xxx ./run.sh"
+    echo ""
 fi
 
 echo "==> Starting API server"

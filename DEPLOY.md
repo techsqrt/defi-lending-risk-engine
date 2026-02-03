@@ -63,15 +63,15 @@ Deploy Aave Risk Monitor to Vercel + Railway + Neon.
    ```
    DATABASE_URL=postgresql://... (from Neon)
    SUBGRAPH_API_KEY=your_graph_api_key
+   ENABLE_EVENT_INGESTION=true
+   RUN_INGESTION_ON_STARTUP=true
    ```
 5. Deploy → Get URL like: `https://xxx.up.railway.app`
 
-### Initial Data Backfill
-
-After deploying, run backfill via Railway shell or locally:
-```bash
-python -m services.api.src.api.jobs.backfill_aave_v3 --hours 24
-```
+The API includes a built-in scheduler that:
+- Runs on startup to populate initial data
+- Runs hourly to keep data fresh
+- Ingests both reserve snapshots and protocol events
 
 ## Step 3: Frontend (Vercel) - Free
 
@@ -99,41 +99,18 @@ python -m services.api.src.api.jobs.backfill_aave_v3 --hours 24
 ## Environment Variables Summary
 
 ### Railway (API)
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | Neon PostgreSQL connection string |
-| `SUBGRAPH_API_KEY` | The Graph API key |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | required | Neon PostgreSQL connection string |
+| `SUBGRAPH_API_KEY` | required | The Graph API key |
+| `ENABLE_EVENT_INGESTION` | `false` | Enable hourly ingestion scheduler |
+| `EVENT_INGESTION_INTERVAL_HOURS` | `1` | Hours between ingestion runs |
+| `RUN_INGESTION_ON_STARTUP` | `true` | Run ingestion immediately on startup |
 
 ### Vercel (Frontend)
 | Variable | Description |
 |----------|-------------|
 | `NEXT_PUBLIC_API_URL` | Railway API URL |
-
-## Scheduled Backfill (Optional)
-
-To keep data fresh, set up a cron job:
-
-### Option A: Railway Cron
-Add to `railway.toml`:
-```toml
-[cron]
-schedule = "0 * * * *"  # Every hour
-command = "python -m services.api.src.api.jobs.backfill_aave_v3 --hours 2"
-```
-
-### Option B: GitHub Actions
-Create `.github/workflows/backfill.yml`:
-```yaml
-name: Backfill
-on:
-  schedule:
-    - cron: '0 * * * *'
-jobs:
-  backfill:
-    runs-on: ubuntu-latest
-    steps:
-      - run: curl -X POST ${{ secrets.BACKFILL_WEBHOOK_URL }}
-```
 
 ## Troubleshooting
 
@@ -143,8 +120,9 @@ jobs:
 
 ### Frontend shows "No data"
 - Verify NEXT_PUBLIC_API_URL points to Railway
-- Run backfill job to populate data
+- Check `ENABLE_EVENT_INGESTION=true` is set
+- Check Railway logs for ingestion errors
 
 ### CORS errors
-- API allows `localhost:3000` by default
-- For production, update `services/api/src/api/main.py` CORS origins
+- API allows `localhost:3000` and `*.vercel.app` by default
+- For custom domains, set `CORS_ORIGIN` env var
