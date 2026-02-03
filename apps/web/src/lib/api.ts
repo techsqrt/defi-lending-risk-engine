@@ -1,4 +1,11 @@
-import type { OverviewResponse, MarketHistory, LatestRawResponse } from './types';
+import type {
+  OverviewResponse,
+  MarketHistory,
+  LatestRawResponse,
+  DebugSnapshotsResponse,
+  DebugEventsResponse,
+  DebugStatsResponse,
+} from './types';
 import type { TimePeriod } from '@/app/components/TimePeriodSelector';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
@@ -36,6 +43,52 @@ export async function fetchMarketLatest(
   );
   if (!res.ok) {
     throw new Error(`Failed to fetch latest: ${res.status}`);
+  }
+  return res.json();
+}
+
+// Debug API functions
+export async function fetchDebugSnapshots(
+  chainId: string,
+  assetAddress: string
+): Promise<DebugSnapshotsResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/debug/asset/${chainId}/${assetAddress}/snapshots`
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch debug snapshots: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchDebugEvents(
+  chainId: string,
+  assetAddress: string,
+  eventType?: string,
+  limit: number = 10
+): Promise<DebugEventsResponse> {
+  const params = new URLSearchParams();
+  if (eventType) params.set('event_type', eventType);
+  params.set('limit', limit.toString());
+
+  const res = await fetch(
+    `${API_BASE}/api/debug/asset/${chainId}/${assetAddress}/events?${params}`
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch debug events: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchDebugStats(
+  chainId: string,
+  assetAddress: string
+): Promise<DebugStatsResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/debug/asset/${chainId}/${assetAddress}/stats`
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch debug stats: ${res.status}`);
   }
   return res.json();
 }
