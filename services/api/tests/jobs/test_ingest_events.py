@@ -86,6 +86,33 @@ class TestTransformSupply:
 
         assert event.amount == Decimal("999")
 
+    def test_stores_caller_in_metadata_when_different_from_user(self):
+        raw = make_raw_event()
+        raw["user"]["id"] = "0xuser"
+        raw["caller"] = {"id": "0xcaller"}
+
+        event = transform_supply(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["caller"] == "0xcaller"
+
+    def test_stores_referrer_in_metadata(self):
+        raw = make_raw_event()
+        raw["referrer"] = {"id": "0xreferrer"}
+
+        event = transform_supply(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["referrer"] == "0xreferrer"
+
+    def test_uses_direct_tx_hash_field(self):
+        raw = make_raw_event()
+        raw["txHash"] = "0x1234567890123456789012345678901234567890123456789012345678901234"
+
+        event = transform_supply(raw, "base")
+
+        assert event.tx_hash == "0x1234567890123456789012345678901234567890123456789012345678901234"
+
 
 class TestTransformWithdraw:
 
@@ -101,6 +128,16 @@ class TestTransformWithdraw:
         event = transform_withdraw(raw, "base")
 
         assert event.user_address == "0xwithdrawer"
+
+    def test_stores_to_in_metadata_when_different_from_user(self):
+        raw = make_raw_event()
+        raw["user"]["id"] = "0xuser"
+        raw["to"] = {"id": "0xrecipient"}
+
+        event = transform_withdraw(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["to"] == "0xrecipient"
 
 
 class TestTransformBorrow:
@@ -120,6 +157,55 @@ class TestTransformBorrow:
         event = transform_borrow(raw, "base")
 
         assert event.event_type == "borrow"
+
+    def test_stores_borrow_rate_mode_in_metadata(self):
+        raw = make_raw_event()
+        raw["borrowRate"] = "5000"
+        raw["borrowRateMode"] = 2  # variable
+
+        event = transform_borrow(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["borrow_rate_mode"] == 2
+
+    def test_stores_token_debts_in_metadata(self):
+        raw = make_raw_event()
+        raw["borrowRate"] = "5000"
+        raw["stableTokenDebt"] = "1000000"
+        raw["variableTokenDebt"] = "2000000"
+
+        event = transform_borrow(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["stable_token_debt"] == "1000000"
+        assert event.metadata["variable_token_debt"] == "2000000"
+
+
+class TestTransformRepay:
+
+    def test_sets_event_type(self):
+        event = transform_repay(make_raw_event(), "base")
+
+        assert event.event_type == "repay"
+
+    def test_stores_repayer_in_metadata_when_different_from_user(self):
+        raw = make_raw_event()
+        raw["user"]["id"] = "0xborrower"
+        raw["repayer"] = {"id": "0xrepayer"}
+
+        event = transform_repay(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["repayer"] == "0xrepayer"
+
+    def test_stores_use_atokens_in_metadata(self):
+        raw = make_raw_event()
+        raw["useATokens"] = True
+
+        event = transform_repay(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["use_atokens"] is True
 
 
 class TestTransformLiquidation:

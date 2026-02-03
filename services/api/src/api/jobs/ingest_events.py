@@ -39,21 +39,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def extract_tx_hash(event_id: str) -> str | None:
-    """Extract transaction hash from subgraph event ID.
+def get_tx_hash(raw: dict[str, Any]) -> str | None:
+    """Get transaction hash from raw event.
 
-    Aave subgraph event IDs are typically formatted as:
-    - {txHash}-{logIndex} or {txHash}:{logIndex}
+    Prefers direct txHash field, falls back to extracting from event ID.
     """
+    # Prefer direct txHash field from subgraph
+    if raw.get("txHash"):
+        return raw["txHash"]
+    # Fallback: extract from event ID (format: {txHash}-{logIndex})
+    event_id = raw.get("id", "")
     if not event_id:
         return None
-    # Try splitting by common separators
     for sep in ["-", ":"]:
         if sep in event_id:
             parts = event_id.split(sep)
             if len(parts) >= 1 and parts[0].startswith("0x") and len(parts[0]) == 66:
                 return parts[0]
-    # If no separator found but starts with 0x and is long enough, it might be just the hash
     if event_id.startswith("0x") and len(event_id) >= 66:
         return event_id[:66]
     return None
@@ -79,8 +81,21 @@ def transform_supply(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw supply event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     user = raw.get("user", {})
+    caller = raw.get("caller", {})
+    referrer = raw.get("referrer", {})
     ts = int(raw["timestamp"])
     decimals = int(reserve.get("decimals", 18))
+
+    # Build metadata with extra supply-specific data
+    metadata: dict[str, Any] = {}
+    caller_id = caller.get("id") if isinstance(caller, dict) else None
+    user_id = user.get("id", "")
+    if caller_id and caller_id != user_id:
+        metadata["caller"] = caller_id
+    referrer_id = referrer.get("id") if isinstance(referrer, dict) else None
+    if referrer_id:
+        metadata["referrer"] = referrer_id
+
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
@@ -90,14 +105,15 @@ def transform_supply(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
         timestamp_day=truncate_to_day(ts),
         timestamp_week=truncate_to_week(ts),
         timestamp_month=truncate_to_month(ts),
-        tx_hash=extract_tx_hash(raw["id"]),
-        user_address=user.get("id", ""),
+        tx_hash=get_tx_hash(raw),
+        user_address=user_id,
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),
         asset_symbol=reserve.get("symbol", ""),
         asset_decimals=decimals,
         amount=Decimal(raw.get("amount", "0")),
         amount_usd=compute_usd_value(raw.get("amount", "0"), decimals, raw.get("assetPriceUSD")),
+        metadata=metadata if metadata else None,
     )
 
 
@@ -105,8 +121,17 @@ def transform_withdraw(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw withdraw (redeemUnderlying) event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     user = raw.get("user", {})
+    to = raw.get("to", {})
     ts = int(raw["timestamp"])
     decimals = int(reserve.get("decimals", 18))
+
+    # Build metadata with extra withdraw-specific data
+    metadata: dict[str, Any] = {}
+    to_id = to.get("id") if isinstance(to, dict) else None
+    user_id = user.get("id", "")
+    if to_id and to_id != user_id:
+        metadata["to"] = to_id
+
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
@@ -116,14 +141,15 @@ def transform_withdraw(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
         timestamp_day=truncate_to_day(ts),
         timestamp_week=truncate_to_week(ts),
         timestamp_month=truncate_to_month(ts),
-        tx_hash=extract_tx_hash(raw["id"]),
-        user_address=user.get("id", ""),
+        tx_hash=get_tx_hash(raw),
+        user_address=user_id,
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),
         asset_symbol=reserve.get("symbol", ""),
         asset_decimals=decimals,
         amount=Decimal(raw.get("amount", "0")),
         amount_usd=compute_usd_value(raw.get("amount", "0"), decimals, raw.get("assetPriceUSD")),
+        metadata=metadata if metadata else None,
     )
 
 
@@ -131,8 +157,28 @@ def transform_borrow(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw borrow event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     user = raw.get("user", {})
+    caller = raw.get("caller", {})
+    referrer = raw.get("referrer", {})
     ts = int(raw["timestamp"])
     decimals = int(reserve.get("decimals", 18))
+
+    # Build metadata with extra borrow-specific data
+    metadata: dict[str, Any] = {}
+    caller_id = caller.get("id") if isinstance(caller, dict) else None
+    user_id = user.get("id", "")
+    if caller_id and caller_id != user_id:
+        metadata["caller"] = caller_id
+    referrer_id = referrer.get("id") if isinstance(referrer, dict) else None
+    if referrer_id:
+        metadata["referrer"] = referrer_id
+    # borrowRateMode: 1=stable, 2=variable
+    if raw.get("borrowRateMode"):
+        metadata["borrow_rate_mode"] = int(raw["borrowRateMode"])
+    if raw.get("stableTokenDebt"):
+        metadata["stable_token_debt"] = raw["stableTokenDebt"]
+    if raw.get("variableTokenDebt"):
+        metadata["variable_token_debt"] = raw["variableTokenDebt"]
+
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
@@ -142,8 +188,8 @@ def transform_borrow(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
         timestamp_day=truncate_to_day(ts),
         timestamp_week=truncate_to_week(ts),
         timestamp_month=truncate_to_month(ts),
-        tx_hash=extract_tx_hash(raw["id"]),
-        user_address=user.get("id", ""),
+        tx_hash=get_tx_hash(raw),
+        user_address=user_id,
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),
         asset_symbol=reserve.get("symbol", ""),
@@ -151,6 +197,7 @@ def transform_borrow(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
         amount=Decimal(raw.get("amount", "0")),
         amount_usd=compute_usd_value(raw.get("amount", "0"), decimals, raw.get("assetPriceUSD")),
         borrow_rate=Decimal(raw["borrowRate"]) if raw.get("borrowRate") else None,
+        metadata=metadata if metadata else None,
     )
 
 
@@ -158,8 +205,19 @@ def transform_repay(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw repay event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     user = raw.get("user", {})
+    repayer = raw.get("repayer", {})
     ts = int(raw["timestamp"])
     decimals = int(reserve.get("decimals", 18))
+
+    # Build metadata with extra repay-specific data
+    metadata: dict[str, Any] = {}
+    repayer_id = repayer.get("id") if isinstance(repayer, dict) else None
+    user_id = user.get("id", "")
+    if repayer_id and repayer_id != user_id:
+        metadata["repayer"] = repayer_id
+    if raw.get("useATokens") is not None:
+        metadata["use_atokens"] = raw["useATokens"]
+
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
@@ -169,14 +227,15 @@ def transform_repay(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
         timestamp_day=truncate_to_day(ts),
         timestamp_week=truncate_to_week(ts),
         timestamp_month=truncate_to_month(ts),
-        tx_hash=extract_tx_hash(raw["id"]),
-        user_address=user.get("id", ""),
+        tx_hash=get_tx_hash(raw),
+        user_address=user_id,
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),
         asset_symbol=reserve.get("symbol", ""),
         asset_decimals=decimals,
         amount=Decimal(raw.get("amount", "0")),
         amount_usd=compute_usd_value(raw.get("amount", "0"), decimals, raw.get("assetPriceUSD")),
+        metadata=metadata if metadata else None,
     )
 
 
@@ -223,7 +282,7 @@ def transform_liquidation(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
         timestamp_day=truncate_to_day(ts),
         timestamp_week=truncate_to_week(ts),
         timestamp_month=truncate_to_month(ts),
-        tx_hash=extract_tx_hash(raw["id"]),
+        tx_hash=get_tx_hash(raw),
         user_address=user.get("id", ""),  # liquidated user
         liquidator_address=liquidator_addr if liquidator_addr else None,
         # Primary asset is the principal (debt being repaid)
@@ -271,7 +330,7 @@ def transform_flashloan(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
         timestamp_day=truncate_to_day(ts),
         timestamp_week=truncate_to_week(ts),
         timestamp_month=truncate_to_month(ts),
-        tx_hash=extract_tx_hash(raw["id"]),
+        tx_hash=get_tx_hash(raw),
         user_address=initiator.get("id", ""),
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),

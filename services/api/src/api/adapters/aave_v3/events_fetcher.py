@@ -18,10 +18,13 @@ query GetSupplies($from: Int!, $skip: Int!) {
     skip: $skip
   ) {
     id
+    txHash
     timestamp
     amount
     assetPriceUSD
     user { id }
+    caller { id }
+    referrer { id }
     reserve { symbol underlyingAsset decimals }
   }
 }
@@ -36,10 +39,12 @@ query GetWithdraws($from: Int!, $skip: Int!) {
     skip: $skip
   ) {
     id
+    txHash
     timestamp
     amount
     assetPriceUSD
     user { id }
+    to { id }
     reserve { symbol underlyingAsset decimals }
   }
 }
@@ -54,11 +59,17 @@ query GetBorrows($from: Int!, $skip: Int!) {
     skip: $skip
   ) {
     id
+    txHash
     timestamp
     amount
     assetPriceUSD
     borrowRate
+    borrowRateMode
+    stableTokenDebt
+    variableTokenDebt
     user { id }
+    caller { id }
+    referrer { id }
     reserve { symbol underlyingAsset decimals }
   }
 }
@@ -73,10 +84,13 @@ query GetRepays($from: Int!, $skip: Int!) {
     skip: $skip
   ) {
     id
+    txHash
     timestamp
     amount
     assetPriceUSD
+    useATokens
     user { id }
+    repayer { id }
     reserve { symbol underlyingAsset decimals }
   }
 }
@@ -91,6 +105,7 @@ query GetLiquidations($from: Int!, $skip: Int!) {
     skip: $skip
   ) {
     id
+    txHash
     timestamp
     user { id }
     liquidator { id }
@@ -113,6 +128,7 @@ query GetFlashLoans($from: Int!, $skip: Int!) {
     skip: $skip
   ) {
     id
+    txHash
     timestamp
     amount
     assetPriceUSD
