@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from services.api.src.api.adapters.aave_v3.config import FIRST_EVENT_TIME, get_default_config
-from services.api.src.api.db.engine import get_engine
+from services.api.src.api.db.engine import get_engine, init_db
 from services.api.src.api.jobs.ingest_events import ingest_all_events
 from services.api.src.api.jobs.ingest_snapshots import ingest_all_snapshots
 
@@ -28,8 +28,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Local database URL (Docker compose)
-LOCAL_DATABASE_URL = "postgresql://aave:aave@localhost:5432/aave_risk"
+# Local database URLs
+LOCAL_SQLITE_URL = "sqlite:///./local.db"
+LOCAL_POSTGRES_URL = "postgresql://aave:aave@localhost:5432/aave_risk"
 
 
 def get_remote_database_url() -> str:
@@ -46,15 +47,35 @@ def get_remote_database_url() -> str:
 def truncate_tables(engine: Engine) -> None:
     """Truncate all data tables (keeps schema)."""
     logger.info("Truncating tables...")
+    is_sqlite = "sqlite" in str(engine.url)
     with engine.begin() as conn:
-        # Disable foreign key checks temporarily
-        conn.execute(text("TRUNCATE TABLE protocol_events CASCADE"))
-        conn.execute(text("TRUNCATE TABLE reserve_snapshots_hourly CASCADE"))
+        if is_sqlite:
+            # SQLite doesn't support TRUNCATE, use DELETE
+            # Use IF EXISTS pattern via try/except
+            for table in ["protocol_events", "reserve_snapshots_hourly"]:
+                try:
+                    conn.execute(text(f"DELETE FROM {table}"))
+                except Exception:
+                    logger.debug(f"Table {table} does not exist yet, skipping")
+        else:
+            # PostgreSQL
+            conn.execute(text("TRUNCATE TABLE protocol_events CASCADE"))
+            conn.execute(text("TRUNCATE TABLE reserve_snapshots_hourly CASCADE"))
     logger.info("Tables truncated")
 
 
 def run_migrations(engine: Engine) -> None:
     """Run all SQL migrations in order."""
+    is_sqlite = "sqlite" in str(engine.url)
+
+    # For SQLite, use SQLAlchemy's create_all which handles schema from models
+    if is_sqlite:
+        logger.info("Creating SQLite schema from models...")
+        init_db(engine)
+        logger.info("SQLite schema created")
+        return
+
+    # For PostgreSQL, run SQL migrations
     migrations_dir = Path(__file__).parent.parent.parent.parent / "migrations"
 
     if not migrations_dir.exists():
@@ -137,7 +158,12 @@ def main() -> int:
     target_group.add_argument(
         "--local",
         action="store_true",
-        help="Target local database (localhost:5432)",
+        help="Target local SQLite database (./local.db)",
+    )
+    target_group.add_argument(
+        "--local-postgres",
+        action="store_true",
+        help="Target local PostgreSQL (localhost:5432, requires Docker)",
     )
     target_group.add_argument(
         "--remote",
@@ -171,8 +197,11 @@ def main() -> int:
 
     # Determine database URL
     if args.local:
-        database_url = LOCAL_DATABASE_URL
-        target_name = "LOCAL (localhost:5432)"
+        database_url = LOCAL_SQLITE_URL
+        target_name = "LOCAL SQLite (./local.db)"
+    elif args.local_postgres:
+        database_url = LOCAL_POSTGRES_URL
+        target_name = "LOCAL PostgreSQL (localhost:5432)"
     else:
         database_url = get_remote_database_url()
         # Mask password in URL for display

@@ -128,7 +128,6 @@ query GetFlashLoans($from: Int!, $skip: Int!) {
     skip: $skip
   ) {
     id
-    txHash
     timestamp
     amount
     assetPriceUSD
