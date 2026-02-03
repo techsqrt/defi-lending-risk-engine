@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
-from typing import Any
+from enum import Enum
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.engine import Engine
@@ -15,6 +15,14 @@ from services.api.src.api.schemas.responses import (
 )
 
 router = APIRouter(prefix="/markets", tags=["markets"])
+
+
+class TimePeriod(str, Enum):
+    H24 = "24H"
+    D7 = "7D"
+    MTD = "MTD"
+    D30 = "30D"
+    ALL = "ALL"
 
 
 def get_db_engine() -> Engine:
@@ -96,27 +104,90 @@ def get_market_history(
     chain_id: str,
     market_id: str,
     asset_address: str,
-    hours: int = Query(default=24, ge=1, le=168),
+    period: TimePeriod = Query(default=TimePeriod.H24),
+    hours: int | None = Query(default=None, ge=1, le=8760, description="Legacy: use period instead"),
     engine: Engine = Depends(get_db_engine),
 ) -> MarketHistory:
     """
     Get historical data for a specific market/asset.
 
-    Returns hourly snapshots for the last N hours (default: 24, max: 168).
+    Period options:
+    - 24H: Last 24 hours, hourly granularity
+    - 7D: Last 7 days, hourly granularity
+    - MTD: Month to date, daily granularity
+    - 30D: Last 30 days, daily granularity
+    - ALL: All time, daily granularity
     """
     repo = ReserveSnapshotRepository(engine)
-
     now = datetime.now(timezone.utc)
-    from_time = now - timedelta(hours=hours)
-    to_time = now
 
-    snapshots = repo.get_snapshots(
-        chain_id=chain_id,
-        market_id=market_id,
-        asset_address=asset_address.lower(),
-        from_time=from_time,
-        to_time=to_time,
-    )
+    # Legacy support: if hours is provided, use it
+    if hours is not None:
+        from_time = now - timedelta(hours=hours)
+        snapshots = repo.get_snapshots(
+            chain_id=chain_id,
+            market_id=market_id,
+            asset_address=asset_address.lower(),
+            from_time=from_time,
+            to_time=now,
+        )
+    elif period == TimePeriod.H24:
+        # 24H: hourly granularity
+        from_time = now - timedelta(hours=24)
+        snapshots = repo.get_snapshots(
+            chain_id=chain_id,
+            market_id=market_id,
+            asset_address=asset_address.lower(),
+            from_time=from_time,
+            to_time=now,
+        )
+    elif period == TimePeriod.D7:
+        # 7D: hourly granularity
+        from_time = now - timedelta(days=7)
+        snapshots = repo.get_snapshots(
+            chain_id=chain_id,
+            market_id=market_id,
+            asset_address=asset_address.lower(),
+            from_time=from_time,
+            to_time=now,
+        )
+    elif period == TimePeriod.MTD:
+        # MTD: daily granularity, from start of month
+        from_time = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        snapshots = repo.get_snapshots_daily(
+            chain_id=chain_id,
+            market_id=market_id,
+            asset_address=asset_address.lower(),
+            from_time=from_time,
+            to_time=now,
+        )
+    elif period == TimePeriod.D30:
+        # 30D: daily granularity
+        from_time = now - timedelta(days=30)
+        snapshots = repo.get_snapshots_daily(
+            chain_id=chain_id,
+            market_id=market_id,
+            asset_address=asset_address.lower(),
+            from_time=from_time,
+            to_time=now,
+        )
+    elif period == TimePeriod.ALL:
+        # ALL: daily granularity, all time
+        snapshots = repo.get_all_snapshots_daily(
+            chain_id=chain_id,
+            market_id=market_id,
+            asset_address=asset_address.lower(),
+        )
+    else:
+        # Default to 24H
+        from_time = now - timedelta(hours=24)
+        snapshots = repo.get_snapshots(
+            chain_id=chain_id,
+            market_id=market_id,
+            asset_address=asset_address.lower(),
+            from_time=from_time,
+            to_time=now,
+        )
 
     if not snapshots:
         raise HTTPException(status_code=404, detail="No data found for this market/asset")
