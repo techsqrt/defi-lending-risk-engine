@@ -18,7 +18,7 @@ import {
 } from 'recharts';
 import { fetchMarketHistory, fetchMarketLatest } from '@/lib/api';
 import type { MarketHistory, LatestRawResponse, RateModel } from '@/lib/types';
-import { TimePeriodSelector, TimePeriod, getHoursForPeriod } from '@/app/components/TimePeriodSelector';
+import { TimePeriodSelector, TimePeriod, getPeriodConfig } from '@/app/components/TimePeriodSelector';
 
 interface ChartDataPoint {
   timestamp: string;
@@ -58,6 +58,38 @@ function formatUSDAxis(value: number): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
   return `$${value.toFixed(0)}`;
+}
+
+// Format relative time
+function formatRelativeTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+}
+
+// Calculate next snapshot time (scheduler runs hourly at :00)
+function getNextSnapshotTime(): Date {
+  const now = new Date();
+  const next = new Date(now);
+  next.setMinutes(0, 0, 0);
+  next.setHours(next.getHours() + 1);
+  return next;
+}
+
+function formatTimeUntil(date: Date): string {
+  const now = new Date();
+  const diffMs = date.getTime() - now.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins <= 0) return 'any moment';
+  if (diffMins < 60) return `in ${diffMins}m`;
+  return `in ${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
 }
 
 // Custom tooltip for utilization chart
@@ -115,9 +147,8 @@ export default function AssetDetailsPage() {
 
   useEffect(() => {
     setLoading(true);
-    const hours = getHoursForPeriod(timePeriod);
     Promise.all([
-      fetchMarketHistory(chainId, marketId, assetAddress, hours),
+      fetchMarketHistory(chainId, marketId, assetAddress, timePeriod),
       fetchMarketLatest(chainId, marketId, assetAddress),
     ])
       .then(([historyData, latestData]) => {
@@ -157,12 +188,41 @@ export default function AssetDetailsPage() {
     );
   }
 
-  const chartData: ChartDataPoint[] = history.snapshots.map((s) => {
+  const periodConfig = getPeriodConfig(timePeriod);
+  const isDaily = periodConfig.granularity === 'day';
+
+  // Build chart data with smart axis labels
+  const chartData: ChartDataPoint[] = history.snapshots.map((s, index) => {
     const date = new Date(s.timestamp_hour);
+    const prevDate = index > 0 ? new Date(history.snapshots[index - 1].timestamp_hour) : null;
+
+    // For hourly data: show date at midnight or when day changes, otherwise just time
+    // For daily data: show "Feb 2", "Feb 3", etc.
+    let timeLabel: string;
+    if (isDaily) {
+      timeLabel = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    } else {
+      const hour = date.getHours();
+      const isNewDay = !prevDate || prevDate.getDate() !== date.getDate();
+
+      if (isNewDay || hour === 0) {
+        // Show date + time at midnight or day change: "Feb 2, 1:00 AM"
+        timeLabel = date.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
+          ', ' + date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+      } else {
+        // Show just time for other hours: "1:00 AM"
+        timeLabel = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+      }
+    }
+
+    const fullTimeLabel = isDaily
+      ? date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+      : date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+
     return {
       timestamp: s.timestamp_hour,
-      time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      fullTime: date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      time: timeLabel,
+      fullTime: fullTimeLabel,
       utilization: s.utilization ? parseFloat(s.utilization) : null,
       suppliedUsd: s.supplied_value_usd ? parseFloat(s.supplied_value_usd) : null,
       borrowedUsd: s.borrowed_value_usd ? parseFloat(s.borrowed_value_usd) : null,
@@ -177,6 +237,12 @@ export default function AssetDetailsPage() {
 
   const currentUtilization = chartData.length > 0 ? chartData[chartData.length - 1].utilization : null;
 
+  // Get latest snapshot time
+  const latestSnapshotTime = history.snapshots.length > 0
+    ? new Date(history.snapshots[history.snapshots.length - 1].timestamp_hour)
+    : null;
+  const nextSnapshotTime = getNextSnapshotTime();
+
   return (
     <main style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
       <Link href="/" style={{ color: '#0066cc', display: 'block', marginBottom: '16px' }}>
@@ -187,9 +253,49 @@ export default function AssetDetailsPage() {
         <h1 style={{ margin: 0 }}>{history.asset_symbol}</h1>
         <TimePeriodSelector selected={timePeriod} onChange={setTimePeriod} />
       </div>
-      <p style={{ color: '#666', marginBottom: '24px' }}>
+      <p style={{ color: '#666', marginBottom: '16px' }}>
         {chainId} / {marketId}
       </p>
+
+      {/* Snapshot Status Table */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '12px',
+        marginBottom: '24px',
+        padding: '16px',
+        background: '#f8fafc',
+        borderRadius: '8px',
+        border: '1px solid #e2e8f0',
+      }}>
+        <div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Latest Snapshot</div>
+          <div style={{ fontSize: '14px', fontWeight: '600' }}>
+            {latestSnapshotTime
+              ? `${latestSnapshotTime.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} (${formatRelativeTime(latestSnapshotTime)})`
+              : 'N/A'
+            }
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Next Snapshot</div>
+          <div style={{ fontSize: '14px', fontWeight: '600' }}>
+            {nextSnapshotTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({formatTimeUntil(nextSnapshotTime)})
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Data Points</div>
+          <div style={{ fontSize: '14px', fontWeight: '600' }}>
+            {history.snapshots.length} ({periodConfig.granularity}ly)
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Current Utilization</div>
+          <div style={{ fontSize: '14px', fontWeight: '600' }}>
+            {formatPercent(currentUtilization)}
+          </div>
+        </div>
+      </div>
 
       <div style={{ display: 'grid', gap: '24px' }}>
         {/* Utilization Chart */}
@@ -197,7 +303,14 @@ export default function AssetDetailsPage() {
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-              <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+              <XAxis
+                dataKey="time"
+                tick={{ fontSize: 11 }}
+                interval={Math.max(0, Math.ceil(chartData.length / 8) - 1)}
+                angle={-25}
+                textAnchor="end"
+                height={50}
+              />
               <YAxis
                 tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
                 domain={[0, 1]}
@@ -239,7 +352,14 @@ export default function AssetDetailsPage() {
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-              <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+              <XAxis
+                dataKey="time"
+                tick={{ fontSize: 11 }}
+                interval={Math.max(0, Math.ceil(chartData.length / 8) - 1)}
+                angle={-25}
+                textAnchor="end"
+                height={50}
+              />
               <YAxis
                 tickFormatter={formatUSDAxis}
                 tick={{ fontSize: 11 }}
@@ -272,7 +392,14 @@ export default function AssetDetailsPage() {
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-              <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+              <XAxis
+                dataKey="time"
+                tick={{ fontSize: 11 }}
+                interval={Math.max(0, Math.ceil(chartData.length / 8) - 1)}
+                angle={-25}
+                textAnchor="end"
+                height={50}
+              />
               <YAxis
                 tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}
                 tick={{ fontSize: 11 }}

@@ -1,21 +1,32 @@
 'use client';
 
-export type TimePeriod = '1H' | '24H' | '7D';
+export type TimePeriod = '24H' | '7D' | 'MTD' | '30D' | 'ALL';
+
+// Granularity determines how data is aggregated
+export type Granularity = 'hour' | 'day';
+
+interface PeriodConfig {
+  value: TimePeriod;
+  label: string;
+  granularity: Granularity;
+}
 
 interface TimePeriodSelectorProps {
   selected: TimePeriod;
   onChange: (period: TimePeriod) => void;
 }
 
-const PERIODS: { value: TimePeriod; label: string; hours: number }[] = [
-  { value: '1H', label: '1H', hours: 1 },
-  { value: '24H', label: '24H', hours: 24 },
-  { value: '7D', label: '7D', hours: 168 },
+const PERIODS: PeriodConfig[] = [
+  { value: '24H', label: '24H', granularity: 'hour' },
+  { value: '7D', label: '7D', granularity: 'hour' },
+  { value: 'MTD', label: 'MTD', granularity: 'day' },
+  { value: '30D', label: '30D', granularity: 'day' },
+  { value: 'ALL', label: 'All', granularity: 'day' },
 ];
 
-export function getHoursForPeriod(period: TimePeriod): number {
-  const p = PERIODS.find((x) => x.value === period);
-  return p?.hours ?? 24;
+export function getPeriodConfig(period: TimePeriod): PeriodConfig {
+  const config = PERIODS.find((x) => x.value === period);
+  return config ?? PERIODS[0];
 }
 
 export function TimePeriodSelector({ selected, onChange }: TimePeriodSelectorProps) {

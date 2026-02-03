@@ -1,4 +1,5 @@
 import type { OverviewResponse, MarketHistory, LatestRawResponse } from './types';
+import type { TimePeriod } from '@/app/components/TimePeriodSelector';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
@@ -14,10 +15,10 @@ export async function fetchMarketHistory(
   chainId: string,
   marketId: string,
   assetAddress: string,
-  hours: number = 24
+  period: TimePeriod = '24H'
 ): Promise<MarketHistory> {
   const res = await fetch(
-    `${API_BASE}/api/markets/${chainId}/${marketId}/${assetAddress}/history?hours=${hours}`
+    `${API_BASE}/api/markets/${chainId}/${marketId}/${assetAddress}/history?period=${period}`
   );
   if (!res.ok) {
     throw new Error(`Failed to fetch market history: ${res.status}`);

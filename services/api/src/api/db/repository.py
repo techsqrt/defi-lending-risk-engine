@@ -307,3 +307,88 @@ class ReserveSnapshotRepository:
         with self.engine.connect() as conn:
             result = conn.execute(stmt)
             return [self._row_to_snapshot(row) for row in result]
+
+    def get_snapshots_daily(
+        self,
+        chain_id: str,
+        market_id: str,
+        asset_address: str,
+        from_time: datetime,
+        to_time: datetime,
+    ) -> list[ReserveSnapshot]:
+        """
+        Get daily snapshots (one per day, using latest hour of each day).
+
+        Uses timestamp_day for grouping and returns the latest hourly snapshot
+        for each unique day.
+        """
+        # Subquery to get max timestamp per day for this asset
+        subq = (
+            select(
+                reserve_snapshots_hourly.c.timestamp_day,
+                func.max(reserve_snapshots_hourly.c.timestamp_hour).label("max_ts"),
+            )
+            .where(reserve_snapshots_hourly.c.chain_id == chain_id)
+            .where(reserve_snapshots_hourly.c.market_id == market_id)
+            .where(reserve_snapshots_hourly.c.asset_address == asset_address)
+            .where(reserve_snapshots_hourly.c.timestamp_day >= from_time)
+            .where(reserve_snapshots_hourly.c.timestamp_day <= to_time)
+            .group_by(reserve_snapshots_hourly.c.timestamp_day)
+            .subquery()
+        )
+
+        stmt = (
+            select(reserve_snapshots_hourly)
+            .join(
+                subq,
+                (reserve_snapshots_hourly.c.chain_id == chain_id)
+                & (reserve_snapshots_hourly.c.market_id == market_id)
+                & (reserve_snapshots_hourly.c.asset_address == asset_address)
+                & (reserve_snapshots_hourly.c.timestamp_day == subq.c.timestamp_day)
+                & (reserve_snapshots_hourly.c.timestamp_hour == subq.c.max_ts),
+            )
+            .order_by(reserve_snapshots_hourly.c.timestamp_day)
+        )
+
+        with self.engine.connect() as conn:
+            result = conn.execute(stmt)
+            return [self._row_to_snapshot(row) for row in result]
+
+    def get_all_snapshots_daily(
+        self,
+        chain_id: str,
+        market_id: str,
+        asset_address: str,
+    ) -> list[ReserveSnapshot]:
+        """
+        Get all daily snapshots (one per day, all time).
+        """
+        # Subquery to get max timestamp per day
+        subq = (
+            select(
+                reserve_snapshots_hourly.c.timestamp_day,
+                func.max(reserve_snapshots_hourly.c.timestamp_hour).label("max_ts"),
+            )
+            .where(reserve_snapshots_hourly.c.chain_id == chain_id)
+            .where(reserve_snapshots_hourly.c.market_id == market_id)
+            .where(reserve_snapshots_hourly.c.asset_address == asset_address)
+            .group_by(reserve_snapshots_hourly.c.timestamp_day)
+            .subquery()
+        )
+
+        stmt = (
+            select(reserve_snapshots_hourly)
+            .join(
+                subq,
+                (reserve_snapshots_hourly.c.chain_id == chain_id)
+                & (reserve_snapshots_hourly.c.market_id == market_id)
+                & (reserve_snapshots_hourly.c.asset_address == asset_address)
+                & (reserve_snapshots_hourly.c.timestamp_day == subq.c.timestamp_day)
+                & (reserve_snapshots_hourly.c.timestamp_hour == subq.c.max_ts),
+            )
+            .order_by(reserve_snapshots_hourly.c.timestamp_day)
+        )
+
+        with self.engine.connect() as conn:
+            result = conn.execute(stmt)
+            return [self._row_to_snapshot(row) for row in result]
