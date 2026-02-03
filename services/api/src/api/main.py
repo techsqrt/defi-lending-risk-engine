@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
         run_migrations()
 
     # Start ingestion scheduler (snapshots + events)
-    if os.getenv("ENABLE_EVENT_INGESTION", "false").lower() == "true":
+    if os.getenv("ENABLE_EVENT_INGESTION", "true").lower() == "true":
         interval_hours = int(os.getenv("EVENT_INGESTION_INTERVAL_HOURS", "1"))
         logger.info(f"Starting ingestion scheduler (every {interval_hours}h)")
 

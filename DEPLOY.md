@@ -63,8 +63,6 @@ Deploy Aave Risk Monitor to Vercel + Railway + Neon.
    ```
    DATABASE_URL=postgresql://... (from Neon)
    SUBGRAPH_API_KEY=your_graph_api_key
-   ENABLE_EVENT_INGESTION=true
-   RUN_INGESTION_ON_STARTUP=true
    ```
 5. Deploy → Get URL like: `https://xxx.up.railway.app`
 
@@ -103,7 +101,7 @@ The API includes a built-in scheduler that:
 |----------|---------|-------------|
 | `DATABASE_URL` | required | Neon PostgreSQL connection string |
 | `SUBGRAPH_API_KEY` | required | The Graph API key |
-| `ENABLE_EVENT_INGESTION` | `false` | Enable hourly ingestion scheduler |
+| `ENABLE_EVENT_INGESTION` | `true` | Enable hourly ingestion scheduler |
 | `EVENT_INGESTION_INTERVAL_HOURS` | `1` | Hours between ingestion runs |
 | `RUN_INGESTION_ON_STARTUP` | `true` | Run ingestion immediately on startup |
 
