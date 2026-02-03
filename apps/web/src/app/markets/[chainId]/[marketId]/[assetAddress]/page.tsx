@@ -243,47 +243,31 @@ export default function AssetDetailsPage() {
   const periodConfig = getPeriodConfig(timePeriod);
   const isDaily = periodConfig.granularity === 'day';
 
-  // Format date/time in UTC
-  const formatUTCDate = (date: Date): string => {
-    const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-    const day = date.getUTCDate();
-    return `${month} ${day}`;
+  // Format datetime in UTC - always include short date + time
+  const formatUTCDateTime = (isoString: string): string => {
+    // Parse ISO string and extract UTC components directly
+    // ISO format: "2026-02-01T00:00:00+00:00" or "2026-02-01T00:00:00Z"
+    const match = isoString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!match) return isoString;
+
+    const [, year, monthStr, dayStr, hourStr, minStr] = match;
+    const month = parseInt(monthStr, 10);
+    const day = parseInt(dayStr, 10);
+    const hour = parseInt(hourStr, 10);
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthName = monthNames[month - 1];
+    const hour12 = hour % 12 || 12;
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+
+    return `${monthName} ${day}, ${hour12}:${minStr} ${ampm}`;
   };
 
-  const formatUTCTime = (date: Date): string => {
-    const hours = date.getUTCHours();
-    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const hour12 = hours % 12 || 12;
-    return `${hour12}:${minutes} ${ampm}`;
-  };
-
-  // Build chart data with smart axis labels (all in UTC)
-  const chartData: ChartDataPoint[] = history.snapshots.map((s, index) => {
-    const date = new Date(s.timestamp_hour);
-    const prevDate = index > 0 ? new Date(history.snapshots[index - 1].timestamp_hour) : null;
-
-    // For hourly data: show date when day changes, otherwise just time
-    // For daily data: show "Feb 2, 12:00 AM" with time for clarity
-    let timeLabel: string;
-    if (isDaily) {
-      // Daily view: show date + midnight time for clarity
-      timeLabel = `${formatUTCDate(date)}, 12:00 AM`;
-    } else {
-      const isNewDay = !prevDate || prevDate.getUTCDate() !== date.getUTCDate();
-
-      if (isNewDay) {
-        // Show date + time when day changes: "Feb 2, 1:00 AM"
-        timeLabel = `${formatUTCDate(date)}, ${formatUTCTime(date)}`;
-      } else {
-        // Show just time for other hours: "1:00 AM"
-        timeLabel = formatUTCTime(date);
-      }
-    }
-
-    const fullTimeLabel = isDaily
-      ? `${date.toLocaleString('en-US', { weekday: 'short', timeZone: 'UTC' })}, ${formatUTCDate(date)}, ${date.getUTCFullYear()} (UTC)`
-      : `${formatUTCDate(date)}, ${formatUTCTime(date)} UTC`;
+  // Build chart data with full datetime labels (all in UTC)
+  const chartData: ChartDataPoint[] = history.snapshots.map((s) => {
+    // Always show full date + time: "Feb 1, 12:00 AM"
+    const timeLabel = formatUTCDateTime(s.timestamp_hour);
+    const fullTimeLabel = `${timeLabel} UTC`;
 
     return {
       timestamp: s.timestamp_hour,
@@ -303,19 +287,22 @@ export default function AssetDetailsPage() {
 
   const currentUtilization = chartData.length > 0 ? chartData[chartData.length - 1].utilization : null;
 
-  // Get latest snapshot time
-  const latestSnapshotTime = history.snapshots.length > 0
-    ? new Date(history.snapshots[history.snapshots.length - 1].timestamp_hour)
+  // Get latest snapshot time (keep as ISO string and as Date for relative time)
+  const latestSnapshotIso = history.snapshots.length > 0
+    ? history.snapshots[history.snapshots.length - 1].timestamp_hour
     : null;
+  const latestSnapshotDate = latestSnapshotIso ? new Date(latestSnapshotIso) : null;
   const nextSnapshotTime = getNextSnapshotTime();
 
-  // Format snapshot times in UTC
-  const formatSnapshotTimeUTC = (date: Date): string => {
-    const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-    const day = date.getUTCDate();
-    const hours = date.getUTCHours().toString().padStart(2, '0');
-    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-    return `${month} ${day}, ${hours}:${minutes}`;
+  // Format snapshot times in UTC from ISO string
+  const formatSnapshotTimeUTC = (isoString: string): string => {
+    const match = isoString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!match) return isoString;
+
+    const [, , monthStr, dayStr, hourStr, minStr] = match;
+    const month = parseInt(monthStr, 10);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${monthNames[month - 1]} ${parseInt(dayStr, 10)}, ${hourStr}:${minStr}`;
   };
 
   const formatNextSnapshotUTC = (date: Date): string => {
@@ -349,8 +336,8 @@ export default function AssetDetailsPage() {
         <div>
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Latest Snapshot</div>
           <div style={{ fontSize: '14px', fontWeight: '600' }}>
-            {latestSnapshotTime
-              ? `${formatSnapshotTimeUTC(latestSnapshotTime)} UTC (${formatRelativeTime(latestSnapshotTime)})`
+            {latestSnapshotIso && latestSnapshotDate
+              ? `${formatSnapshotTimeUTC(latestSnapshotIso)} UTC (${formatRelativeTime(latestSnapshotDate)})`
               : 'N/A'
             }
           </div>
@@ -789,13 +776,35 @@ function EventsTable({ events }: { events: DebugEventsResponse['latest'] }) {
     return <div style={{ color: '#64748b', fontSize: '13px' }}>No events found</div>;
   }
 
+  // Get explorer URL based on chain
+  const getExplorerTxUrl = (chainId: string, txHash: string): string => {
+    if (chainId === 'base') return `https://basescan.org/tx/${txHash}`;
+    return `https://etherscan.io/tx/${txHash}`;
+  };
+
+  // Get Debank profile URL for user
+  const getDebankUrl = (address: string): string => {
+    return `https://debank.com/profile/${address}`;
+  };
+
+  // Format timestamp from unix to UTC string
+  const formatTimestampUTC = (timestamp: number): string => {
+    const date = new Date(timestamp * 1000);
+    const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    const day = date.getUTCDate();
+    const hours = date.getUTCHours().toString().padStart(2, '0');
+    const mins = date.getUTCMinutes().toString().padStart(2, '0');
+    return `${month} ${day}, ${hours}:${mins}`;
+  };
+
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
         <thead>
           <tr style={{ background: '#f1f5f9' }}>
             <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Type</th>
-            <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Time</th>
+            <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Time (UTC)</th>
+            <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Tx</th>
             <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>User</th>
             <th style={{ padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Amount USD</th>
           </tr>
@@ -820,16 +829,31 @@ function EventsTable({ events }: { events: DebugEventsResponse['latest'] }) {
                 </span>
               </td>
               <td style={{ padding: '6px 8px', borderBottom: '1px solid #eee' }}>
-                {new Date(event.timestamp * 1000).toLocaleString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  timeZone: 'UTC',
-                })} UTC
+                {formatTimestampUTC(event.timestamp)}
               </td>
               <td style={{ padding: '6px 8px', borderBottom: '1px solid #eee', fontFamily: 'monospace', fontSize: '10px' }}>
-                {event.user_address.slice(0, 6)}...{event.user_address.slice(-4)}
+                {event.tx_hash ? (
+                  <a
+                    href={getExplorerTxUrl(event.chain_id, event.tx_hash)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#0066cc', textDecoration: 'none' }}
+                  >
+                    {event.tx_hash.slice(0, 8)}...
+                  </a>
+                ) : (
+                  <span style={{ color: '#999' }}>-</span>
+                )}
+              </td>
+              <td style={{ padding: '6px 8px', borderBottom: '1px solid #eee', fontFamily: 'monospace', fontSize: '10px' }}>
+                <a
+                  href={getDebankUrl(event.user_address)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#0066cc', textDecoration: 'none' }}
+                >
+                  {event.user_address.slice(0, 6)}...{event.user_address.slice(-4)}
+                </a>
               </td>
               <td style={{ padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid #eee' }}>
                 {event.amount_usd ? formatUSDCompact(parseFloat(event.amount_usd)) : 'N/A'}

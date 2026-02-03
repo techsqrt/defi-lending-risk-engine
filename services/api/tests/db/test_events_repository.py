@@ -34,6 +34,7 @@ def make_event(
         timestamp_day=truncate_to_day(timestamp),
         timestamp_week=truncate_to_week(timestamp),
         timestamp_month=truncate_to_month(timestamp),
+        tx_hash=kwargs.get("tx_hash"),
         user_address=user_address,
         liquidator_address=kwargs.get("liquidator_address"),
         asset_address=kwargs.get("asset_address", "0xtoken"),
@@ -45,6 +46,7 @@ def make_event(
         collateral_asset_symbol=kwargs.get("collateral_asset_symbol"),
         collateral_amount=kwargs.get("collateral_amount"),
         borrow_rate=kwargs.get("borrow_rate"),
+        metadata=kwargs.get("metadata"),
     )
 
 
@@ -146,6 +148,34 @@ class TestInsertEvents:
         count = repository.insert_events([event])
 
         assert count == 1
+
+    def test_stores_and_retrieves_metadata(self, repository):
+        metadata = {
+            "collateral_price_usd": "2000",
+            "borrow_price_usd": "1",
+            "collateral_decimals": 18,
+            "collateral_amount_usd": "1000",
+        }
+        event = make_event(
+            id="liq-meta-1",
+            event_type="liquidation",
+            metadata=metadata,
+        )
+
+        repository.insert_events([event])
+        events = repository.get_recent_events(limit=1, event_type="liquidation")
+
+        assert len(events) == 1
+        assert events[0]["metadata"] == metadata
+
+    def test_metadata_none_when_not_provided(self, repository):
+        event = make_event(id="supply-1", event_type="supply")
+
+        repository.insert_events([event])
+        events = repository.get_recent_events(limit=1, event_type="supply")
+
+        assert len(events) == 1
+        assert events[0]["metadata"] is None
 
 
 class TestGetEventCounts:
