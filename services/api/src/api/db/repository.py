@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from sqlalchemy import func, select
@@ -9,6 +9,16 @@ from sqlalchemy.engine import Connection, Engine
 
 from services.api.src.api.db.models import reserve_snapshots_hourly
 from services.api.src.api.domain.models import RateModelParams, ReserveSnapshot
+
+
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    """Ensure datetime is UTC-aware. SQLite returns naive datetimes."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        # Naive datetime from SQLite - treat as UTC
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 class ReserveSnapshotRepository:
@@ -143,10 +153,11 @@ class ReserveSnapshotRepository:
             )
         return ReserveSnapshot(
             timestamp=row.timestamp,
-            timestamp_hour=row.timestamp_hour,
-            timestamp_day=row.timestamp_day,
-            timestamp_week=row.timestamp_week,
-            timestamp_month=row.timestamp_month,
+            # Ensure timestamps are UTC-aware (SQLite returns naive datetimes)
+            timestamp_hour=_ensure_utc(row.timestamp_hour),
+            timestamp_day=_ensure_utc(row.timestamp_day),
+            timestamp_week=_ensure_utc(row.timestamp_week),
+            timestamp_month=_ensure_utc(row.timestamp_month),
             chain_id=row.chain_id,
             market_id=row.market_id,
             asset_symbol=row.asset_symbol,

@@ -12,6 +12,16 @@ from services.api.src.api.db.models import protocol_events
 from services.api.src.api.domain.models import ProtocolEvent
 
 
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    """Ensure datetime is UTC-aware. SQLite returns naive datetimes."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        # Naive datetime from SQLite - treat as UTC
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 class EventsRepository:
     """Repository for protocol events database operations."""
 
@@ -180,12 +190,14 @@ class EventsRepository:
             result = conn.execute(stmt)
             events = []
             for row in result:
+                # Ensure timestamp is UTC-aware (SQLite returns naive datetimes)
+                ts_hour = _ensure_utc(row.timestamp_hour)
                 events.append({
                     "id": row.id,
                     "chain_id": row.chain_id,
                     "event_type": row.event_type,
                     "timestamp": row.timestamp,
-                    "timestamp_hour": row.timestamp_hour.isoformat(),
+                    "timestamp_hour": ts_hour.isoformat() if ts_hour else None,
                     "tx_hash": row.tx_hash,
                     "user_address": row.user_address,
                     "liquidator_address": row.liquidator_address,

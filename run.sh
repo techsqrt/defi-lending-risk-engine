@@ -34,8 +34,21 @@ echo "==> REPO_ROOT: $REPO_ROOT"
 echo "==> Starting Docker services"
 $COMPOSE -f "$REPO_ROOT/infra/docker-compose.yml" up -d
 
+# Use local Docker PostgreSQL for local development
+export DATABASE_URL="postgresql://aave:aave@localhost:5432/aave_risk"
+echo "==> Using local database: $DATABASE_URL"
+
 echo "==> Waiting for services to be healthy..."
 sleep 3
+
+# Run migrations before ingestion (creates tables if they don't exist)
+echo "==> Running database migrations..."
+cd "$REPO_ROOT/services/api"
+poetry run python -m services.api.src.api.db.migrate || {
+    echo "ERROR: Database migrations failed"
+    exit 1
+}
+cd "$REPO_ROOT"
 
 # Run ingestion if API key is set (uses cursor-based logic - safe to run always)
 if [ -n "$SUBGRAPH_API_KEY" ]; then
