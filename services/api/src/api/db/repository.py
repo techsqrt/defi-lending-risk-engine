@@ -287,3 +287,23 @@ class ReserveSnapshotRepository:
             if row is None or row[0] is None:
                 return None
             return int(row[0])
+
+    def get_recent_snapshots(self, limit: int = 50) -> list[ReserveSnapshot]:
+        """
+        Get the most recent snapshots across all assets.
+
+        Args:
+            limit: Maximum number of snapshots to return (default: 50)
+
+        Returns:
+            List of ReserveSnapshot objects ordered by timestamp descending
+        """
+        stmt = (
+            select(reserve_snapshots_hourly)
+            .order_by(reserve_snapshots_hourly.c.timestamp.desc())
+            .limit(limit)
+        )
+
+        with self.engine.connect() as conn:
+            result = conn.execute(stmt)
+            return [self._row_to_snapshot(row) for row in result]

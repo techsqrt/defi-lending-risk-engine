@@ -18,6 +18,7 @@ import {
 } from 'recharts';
 import { fetchMarketHistory, fetchMarketLatest } from '@/lib/api';
 import type { MarketHistory, LatestRawResponse, RateModel } from '@/lib/types';
+import { TimePeriodSelector, TimePeriod, getHoursForPeriod } from '@/app/components/TimePeriodSelector';
 
 interface ChartDataPoint {
   timestamp: string;
@@ -110,10 +111,13 @@ export default function AssetDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showRawJson, setShowRawJson] = useState(false);
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('24H');
 
   useEffect(() => {
+    setLoading(true);
+    const hours = getHoursForPeriod(timePeriod);
     Promise.all([
-      fetchMarketHistory(chainId, marketId, assetAddress, 24),
+      fetchMarketHistory(chainId, marketId, assetAddress, hours),
       fetchMarketLatest(chainId, marketId, assetAddress),
     ])
       .then(([historyData, latestData]) => {
@@ -122,7 +126,7 @@ export default function AssetDetailsPage() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [chainId, marketId, assetAddress]);
+  }, [chainId, marketId, assetAddress, timePeriod]);
 
   if (loading) {
     return (
@@ -179,14 +183,17 @@ export default function AssetDetailsPage() {
         &larr; Back to Overview
       </Link>
 
-      <h1 style={{ marginBottom: '8px' }}>{history.asset_symbol}</h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+        <h1 style={{ margin: 0 }}>{history.asset_symbol}</h1>
+        <TimePeriodSelector selected={timePeriod} onChange={setTimePeriod} />
+      </div>
       <p style={{ color: '#666', marginBottom: '24px' }}>
         {chainId} / {marketId}
       </p>
 
       <div style={{ display: 'grid', gap: '24px' }}>
         {/* Utilization Chart */}
-        <ChartSection title="Utilization (24h)">
+        <ChartSection title={`Utilization (${timePeriod})`}>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
@@ -228,7 +235,7 @@ export default function AssetDetailsPage() {
         </ChartSection>
 
         {/* Supply & Borrow Chart */}
-        <ChartSection title="Supply & Borrow Value (24h)">
+        <ChartSection title={`Supply & Borrow Value (${timePeriod})`}>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
@@ -261,7 +268,7 @@ export default function AssetDetailsPage() {
         </ChartSection>
 
         {/* Interest Rates Chart */}
-        <ChartSection title="Interest Rates (24h)">
+        <ChartSection title={`Interest Rates (${timePeriod})`}>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 30, right: 100, bottom: 20, left: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />

@@ -2,7 +2,7 @@
 
 Real-time DeFi risk monitoring dashboard for Aave V3 lending protocol.
 
-**[Live Demo](https://aave-risk.vercel.app/)**
+### Live Application: [aave-risk.vercel.app](https://aave-risk.vercel.app/)
 
 ## Overview
 

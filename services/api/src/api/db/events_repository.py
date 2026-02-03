@@ -155,3 +155,45 @@ class EventsRepository:
             min_ts = int(row.min_ts) if row.min_ts is not None else None
             max_ts = int(row.max_ts) if row.max_ts is not None else None
             return (min_ts, max_ts)
+
+    def get_recent_events(
+        self, limit: int = 50, event_type: str | None = None
+    ) -> list[dict]:
+        """
+        Get the most recent events across all types or filtered by type.
+
+        Args:
+            limit: Maximum number of events to return (default: 50)
+            event_type: Optional filter by event type
+
+        Returns:
+            List of event dicts ordered by timestamp descending
+        """
+        stmt = select(protocol_events)
+        if event_type:
+            stmt = stmt.where(protocol_events.c.event_type == event_type)
+        stmt = stmt.order_by(protocol_events.c.timestamp.desc()).limit(limit)
+
+        with self.engine.connect() as conn:
+            result = conn.execute(stmt)
+            events = []
+            for row in result:
+                events.append({
+                    "id": row.id,
+                    "chain_id": row.chain_id,
+                    "event_type": row.event_type,
+                    "timestamp": row.timestamp,
+                    "timestamp_hour": row.timestamp_hour.isoformat(),
+                    "user_address": row.user_address,
+                    "liquidator_address": row.liquidator_address,
+                    "asset_address": row.asset_address,
+                    "asset_symbol": row.asset_symbol,
+                    "asset_decimals": row.asset_decimals,
+                    "amount": str(row.amount),
+                    "amount_usd": str(row.amount_usd) if row.amount_usd else None,
+                    "collateral_asset_address": row.collateral_asset_address,
+                    "collateral_asset_symbol": row.collateral_asset_symbol,
+                    "collateral_amount": str(row.collateral_amount) if row.collateral_amount else None,
+                    "borrow_rate": str(row.borrow_rate) if row.borrow_rate else None,
+                })
+            return events
