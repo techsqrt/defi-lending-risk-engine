@@ -189,7 +189,7 @@ export default function Home() {
           }}
         >
           <p style={{ margin: '0 0 8px 0' }}>
-            No market data available. The database may be empty.
+            No market data available. Run ingestion to populate data:
           </p>
           <code
             style={{
@@ -200,7 +200,7 @@ export default function Home() {
               fontSize: '13px',
             }}
           >
-            python -m services.api.src.api.jobs.backfill_aave_v3 --hours 24
+            python -m services.api.src.api.jobs.ingest_snapshots
           </code>
         </div>
       </main>

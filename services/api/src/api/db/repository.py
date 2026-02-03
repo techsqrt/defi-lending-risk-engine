@@ -252,6 +252,30 @@ class ReserveSnapshotRepository:
             result = conn.execute(stmt)
             return {row.timestamp_hour for row in result}
 
+    def get_max_timestamp(self, chain_id: str, asset_address: str) -> int | None:
+        """
+        Get the latest timestamp for cursor-based fetching.
+
+        Args:
+            chain_id: Chain identifier (e.g., 'ethereum', 'base')
+            asset_address: Asset address (lowercase)
+
+        Returns:
+            The maximum timestamp (unix) for this chain/asset, or None if no data
+        """
+        stmt = (
+            select(func.max(reserve_snapshots_hourly.c.timestamp_hour))
+            .where(reserve_snapshots_hourly.c.chain_id == chain_id)
+            .where(reserve_snapshots_hourly.c.asset_address == asset_address)
+        )
+
+        with self.engine.connect() as conn:
+            result = conn.execute(stmt)
+            row = result.fetchone()
+            if row is None or row[0] is None:
+                return None
+            return int(row[0].timestamp())
+
 
 class RateModelParamsRepository:
     def __init__(self, engine: Engine):

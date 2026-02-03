@@ -1,86 +1,97 @@
 # Aave Risk Monitor
 
-Aave v3 risk monitoring demo.
+Real-time DeFi risk monitoring dashboard for Aave V3 lending protocol.
 
-## Prerequisites
+**[Live Demo](https://aave-risk.vercel.app/)**
 
-- Node.js 20.x
-- Python 3.10.x
-- pnpm
-- Poetry
-- Docker & Docker Compose
+## Overview
 
-## Required Environment Variables
+Production-grade monitoring system that tracks utilization, interest rates, and liquidity metrics across Aave V3 markets on Ethereum and Base. Built with a focus on clean architecture, type safety, and operational reliability.
 
-```bash
-# The Graph API key (required for subgraph data)
-# Get a free key at https://thegraph.com/studio/ (100k queries/month free)
-export SUBGRAPH_API_KEY="your-api-key-here"
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | Next.js 14, TypeScript, Recharts |
+| Backend | FastAPI, SQLAlchemy, Pydantic |
+| Database | PostgreSQL (Neon) |
+| Data Source | The Graph (Aave V3 subgraphs) |
+| Infrastructure | Vercel, Railway, Docker |
+
+## Architecture
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Next.js   │────▶│   FastAPI   │────▶│  PostgreSQL │
+│  (Vercel)   │     │  (Railway)  │     │   (Neon)    │
+└─────────────┘     └──────┬──────┘     └─────────────┘
+                          │
+                   ┌──────▼──────┐
+                   │  The Graph  │
+                   │  Subgraphs  │
+                   └─────────────┘
 ```
 
-Add this to your `~/.bashrc` or `~/.zshrc` and restart your shell (or run `source ~/.bashrc`).
+**Key Design Decisions:**
+- **Cursor-based ingestion**: Tracks per-asset timestamps to avoid missing data
+- **Upsert pattern**: Idempotent writes handle duplicate/replay scenarios
+- **Background scheduler**: APScheduler runs hourly ingestion without external cron
+- **Domain separation**: Clean boundaries between adapters, domain models, and persistence
+
+## Features
+
+- Real-time utilization and interest rate charts
+- Interactive interest rate model visualization
+- Supply/borrow volume tracking
+- Protocol event ingestion (supply, borrow, liquidation, etc.)
+- Multi-chain support (Ethereum, Base)
 
 ## Quick Start
 
 ```bash
-# Install all dependencies
+# Prerequisites: Node.js 20+, Python 3.10+, Docker
+
+# 1. Set API key (get free at https://thegraph.com/studio/)
+export SUBGRAPH_API_KEY="your-key"
+
+# 2. Install dependencies
 ./install.sh
 
-# Start all services (docker, api, web)
+# 3. Start all services
 ./run.sh
-
-# Run all tests
-./test.sh
 ```
 
-## Services
+**Services:**
+- Web: http://localhost:3000
+- API: http://127.0.0.1:8000
+- API Docs: http://127.0.0.1:8000/docs
 
-- **Web**: http://localhost:3000
-- **API**: http://127.0.0.1:8000
+## Project Structure
 
-## Data Ingestion
+```
+├── apps/web/                 # Next.js frontend
+├── services/api/
+│   ├── src/api/
+│   │   ├── adapters/        # External service clients (subgraph)
+│   │   ├── db/              # Repository pattern, migrations
+│   │   ├── domain/          # Core business models
+│   │   ├── jobs/            # Background ingestion jobs
+│   │   └── routes/          # API endpoints
+│   └── tests/               # Pytest test suite
+└── infra/                   # Docker compose configs
+```
 
-### Aave V3 Subgraph Ingestion
-
-Fetch and store Aave V3 reserve data from The Graph subgraphs.
+## Testing
 
 ```bash
-cd services/api
-PYTHONPATH=../.. poetry run python -m api.jobs.ingest_aave_v3 --hours 6 --interval 3600
+./test.sh              # Run all tests
+cd services/api && poetry run pytest -v  # API tests only
 ```
 
-**Database migrations:**
-```bash
-psql $DATABASE_URL < services/api/migrations/001_create_reserve_tables.sql
-```
+## Deployment
 
-## Python Import Style
+See [DEPLOY.md](./DEPLOY.md) for production deployment guide (Vercel + Railway + Neon).
 
-This project uses absolute imports from the repository root (Google style). Always use full paths:
+## License
 
-```python
-# Correct
-from services.api.src.api.main import app
-
-# Incorrect (relative imports)
-from .main import app
-from api.main import app
-```
-
-### IDE Setup
-
-Add the repo root to your Python path for proper IDE support:
-
-**VS Code** (`.vscode/settings.json`):
-```json
-{
-  "python.analysis.extraPaths": ["${workspaceFolder}"]
-}
-```
-
-**PyCharm**: Right-click the repo root folder → Mark Directory as → Sources Root
-
-**Shell** (for manual runs):
-```bash
-export PYTHONPATH="$(pwd)"
-```
+MIT
