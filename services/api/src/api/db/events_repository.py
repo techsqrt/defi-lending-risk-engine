@@ -1,7 +1,6 @@
 """Repository for protocol events database operations."""
 
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Sequence
 
 from sqlalchemy import func, select
@@ -66,6 +65,10 @@ class EventsRepository:
                 "chain_id": e.chain_id,
                 "event_type": e.event_type,
                 "timestamp": e.timestamp,
+                "timestamp_hour": e.timestamp_hour,
+                "timestamp_day": e.timestamp_day,
+                "timestamp_week": e.timestamp_week,
+                "timestamp_month": e.timestamp_month,
                 "user_address": e.user_address,
                 "liquidator_address": e.liquidator_address,
                 "asset_address": e.asset_address,

@@ -8,6 +8,12 @@ from sqlalchemy import create_engine
 from services.api.src.api.db.engine import init_db
 from services.api.src.api.db.events_repository import EventsRepository
 from services.api.src.api.domain.models import ProtocolEvent
+from services.api.src.api.utils.timestamps import (
+    truncate_to_day,
+    truncate_to_hour,
+    truncate_to_month,
+    truncate_to_week,
+)
 
 
 def make_event(
@@ -24,6 +30,10 @@ def make_event(
         chain_id=chain_id,
         event_type=event_type,
         timestamp=timestamp,
+        timestamp_hour=truncate_to_hour(timestamp),
+        timestamp_day=truncate_to_day(timestamp),
+        timestamp_week=truncate_to_week(timestamp),
+        timestamp_month=truncate_to_month(timestamp),
         user_address=user_address,
         liquidator_address=kwargs.get("liquidator_address"),
         asset_address=kwargs.get("asset_address", "0xtoken"),

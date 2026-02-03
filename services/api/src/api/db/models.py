@@ -17,7 +17,13 @@ reserve_snapshots_hourly = Table(
     "reserve_snapshots_hourly",
     metadata,
     Column("id", String, primary_key=True),
+    # Raw timestamp (unix seconds UTC)
+    Column("timestamp", BigInteger, nullable=False),
+    # Truncated timestamps (all floor to period start, UTC with timezone)
     Column("timestamp_hour", DateTime(timezone=True), nullable=False),
+    Column("timestamp_day", DateTime(timezone=True), nullable=False),
+    Column("timestamp_week", DateTime(timezone=True), nullable=False),
+    Column("timestamp_month", DateTime(timezone=True), nullable=False),
     Column("chain_id", String(32), nullable=False),
     Column("market_id", String(64), nullable=False),
     Column("asset_symbol", String(32), nullable=False),
@@ -51,33 +57,19 @@ reserve_snapshots_hourly = Table(
     Index("ix_snapshots_timestamp", "timestamp_hour"),
 )
 
-reserve_rate_model_params = Table(
-    "reserve_rate_model_params",
-    metadata,
-    Column("id", String, primary_key=True),
-    Column("chain_id", String(32), nullable=False),
-    Column("market_id", String(64), nullable=False),
-    Column("asset_address", String(66), nullable=False),
-    Column("valid_from", DateTime(timezone=True), nullable=False),
-    Column("valid_to", DateTime(timezone=True), nullable=True),
-    Column("optimal_utilization_rate", Numeric(38, 18), nullable=False),
-    Column("base_variable_borrow_rate", Numeric(38, 18), nullable=False),
-    Column("variable_rate_slope1", Numeric(38, 18), nullable=False),
-    Column("variable_rate_slope2", Numeric(38, 18), nullable=False),
-    UniqueConstraint(
-        "chain_id", "market_id", "asset_address", "valid_from",
-        name="uq_rate_model_key"
-    ),
-    Index("ix_rate_model_asset", "chain_id", "market_id", "asset_address"),
-)
-
 protocol_events = Table(
     "protocol_events",
     metadata,
     Column("id", String(200), primary_key=True),
     Column("chain_id", String(50), nullable=False),
     Column("event_type", String(20), nullable=False),
+    # Raw timestamp (unix seconds UTC)
     Column("timestamp", BigInteger, nullable=False),
+    # Truncated timestamps (all floor to period start, UTC with timezone)
+    Column("timestamp_hour", DateTime(timezone=True), nullable=False),
+    Column("timestamp_day", DateTime(timezone=True), nullable=False),
+    Column("timestamp_week", DateTime(timezone=True), nullable=False),
+    Column("timestamp_month", DateTime(timezone=True), nullable=False),
     # User info
     Column("user_address", String(100), nullable=False),
     Column("liquidator_address", String(100), nullable=True),
@@ -93,7 +85,7 @@ protocol_events = Table(
     Column("collateral_amount", Numeric(78, 0), nullable=True),
     # Borrow-specific
     Column("borrow_rate", Numeric(38, 0), nullable=True),
-    # Timestamps
+    # Metadata
     Column("created_at", DateTime(timezone=True), nullable=True),
     Index("idx_events_cursor", "chain_id", "event_type", "timestamp"),
     Index("idx_events_user", "user_address", "timestamp"),

@@ -25,6 +25,12 @@ from services.api.src.api.adapters.aave_v3.events_fetcher import EventsFetcher
 from services.api.src.api.db.engine import get_engine, init_db
 from services.api.src.api.db.events_repository import EventsRepository
 from services.api.src.api.domain.models import ProtocolEvent
+from services.api.src.api.utils.timestamps import (
+    truncate_to_day,
+    truncate_to_hour,
+    truncate_to_month,
+    truncate_to_week,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,11 +43,16 @@ def transform_supply(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw supply event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     user = raw.get("user", {})
+    ts = int(raw["timestamp"])
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
         event_type="supply",
-        timestamp=int(raw["timestamp"]),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         user_address=user.get("id", ""),
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),
@@ -56,11 +67,16 @@ def transform_withdraw(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw withdraw (redeemUnderlying) event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     user = raw.get("user", {})
+    ts = int(raw["timestamp"])
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
         event_type="withdraw",
-        timestamp=int(raw["timestamp"]),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         user_address=user.get("id", ""),
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),
@@ -75,11 +91,16 @@ def transform_borrow(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw borrow event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     user = raw.get("user", {})
+    ts = int(raw["timestamp"])
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
         event_type="borrow",
-        timestamp=int(raw["timestamp"]),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         user_address=user.get("id", ""),
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),
@@ -95,11 +116,16 @@ def transform_repay(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw repay event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     user = raw.get("user", {})
+    ts = int(raw["timestamp"])
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
         event_type="repay",
-        timestamp=int(raw["timestamp"]),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         user_address=user.get("id", ""),
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),
@@ -116,11 +142,16 @@ def transform_liquidation(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     liquidator = raw.get("liquidator", "")  # liquidator is a string, not object
     principal_reserve = raw.get("principalReserve", {})
     collateral_reserve = raw.get("collateralReserve", {})
+    ts = int(raw["timestamp"])
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
         event_type="liquidation",
-        timestamp=int(raw["timestamp"]),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         user_address=user.get("id", ""),  # liquidated user
         liquidator_address=liquidator if liquidator else None,
         # Primary asset is the principal (debt being repaid)
@@ -140,11 +171,16 @@ def transform_flashloan(raw: dict[str, Any], chain_id: str) -> ProtocolEvent:
     """Transform a raw flashloan event from subgraph to ProtocolEvent."""
     reserve = raw.get("reserve", {})
     initiator = raw.get("initiator", {})
+    ts = int(raw["timestamp"])
     return ProtocolEvent(
         id=raw["id"],
         chain_id=chain_id,
         event_type="flashloan",
-        timestamp=int(raw["timestamp"]),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         user_address=initiator.get("id", ""),
         liquidator_address=None,
         asset_address=reserve.get("underlyingAsset", ""),

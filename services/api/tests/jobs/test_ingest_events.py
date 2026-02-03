@@ -19,6 +19,12 @@ from services.api.src.api.jobs.ingest_events import (
     transform_supply,
     transform_withdraw,
 )
+from services.api.src.api.utils.timestamps import (
+    truncate_to_day,
+    truncate_to_hour,
+    truncate_to_month,
+    truncate_to_week,
+)
 
 
 def make_raw_event(id: str = "1", timestamp: str = "100", amount: str = "1000"):
@@ -181,11 +187,16 @@ class TestIngestEventType:
         assert fetcher.call_history[0][1] == FIRST_EVENT_TIME
 
     def test_continues_from_max_timestamp(self, fetcher, repository):
+        ts = 999
         existing = ProtocolEvent(
             id="existing",
             chain_id="base",
             event_type="supply",
-            timestamp=999,
+            timestamp=ts,
+            timestamp_hour=truncate_to_hour(ts),
+            timestamp_day=truncate_to_day(ts),
+            timestamp_week=truncate_to_week(ts),
+            timestamp_month=truncate_to_month(ts),
             user_address="0x",
             liquidator_address=None,
             asset_address="0x",

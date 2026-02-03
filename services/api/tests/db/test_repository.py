@@ -7,6 +7,12 @@ from sqlalchemy import create_engine
 from services.api.src.api.db.engine import init_db
 from services.api.src.api.db.repository import ReserveSnapshotRepository
 from services.api.src.api.domain.models import RateModelParams, ReserveSnapshot
+from services.api.src.api.utils.timestamps import (
+    truncate_to_day,
+    truncate_to_hour,
+    truncate_to_month,
+    truncate_to_week,
+)
 
 
 @pytest.fixture
@@ -23,8 +29,14 @@ def repository(sqlite_engine):
 
 @pytest.fixture
 def sample_snapshot():
+    # 2023-11-14 22:00:00 UTC
+    ts = 1699999200
     return ReserveSnapshot(
-        timestamp_hour=datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         chain_id="ethereum",
         market_id="aave-v3-ethereum",
         asset_symbol="WETH",
@@ -51,8 +63,14 @@ class TestReserveSnapshotRepository:
         assert count == 1
 
     def test_upsert_multiple_snapshots(self, repository, sample_snapshot):
+        # 2023-11-14 23:00:00 UTC
+        ts2 = 1700002800
         snapshot2 = ReserveSnapshot(
-            timestamp_hour=datetime(2023, 11, 14, 23, 0, 0, tzinfo=timezone.utc),
+            timestamp=ts2,
+            timestamp_hour=truncate_to_hour(ts2),
+            timestamp_day=truncate_to_day(ts2),
+            timestamp_week=truncate_to_week(ts2),
+            timestamp_month=truncate_to_month(ts2),
             chain_id="ethereum",
             market_id="aave-v3-ethereum",
             asset_symbol="WETH",
@@ -78,7 +96,11 @@ class TestReserveSnapshotRepository:
         repository.upsert_snapshots([sample_snapshot])
 
         updated_snapshot = ReserveSnapshot(
+            timestamp=sample_snapshot.timestamp,
             timestamp_hour=sample_snapshot.timestamp_hour,
+            timestamp_day=sample_snapshot.timestamp_day,
+            timestamp_week=sample_snapshot.timestamp_week,
+            timestamp_month=sample_snapshot.timestamp_month,
             chain_id=sample_snapshot.chain_id,
             market_id=sample_snapshot.market_id,
             asset_symbol=sample_snapshot.asset_symbol,
@@ -108,9 +130,17 @@ class TestReserveSnapshotRepository:
         assert results[0].borrow_cap == Decimal("150000")
 
     def test_get_snapshots_filters_by_time_range(self, repository):
-        snapshots = [
-            ReserveSnapshot(
-                timestamp_hour=datetime(2023, 11, 14, hour, 0, 0, tzinfo=timezone.utc),
+        # Base timestamp: 2023-11-14 00:00:00 UTC
+        base_ts = 1699920000
+        snapshots = []
+        for hour in range(24):
+            ts = base_ts + hour * 3600
+            snapshots.append(ReserveSnapshot(
+                timestamp=ts,
+                timestamp_hour=truncate_to_hour(ts),
+                timestamp_day=truncate_to_day(ts),
+                timestamp_week=truncate_to_week(ts),
+                timestamp_month=truncate_to_month(ts),
                 chain_id="ethereum",
                 market_id="aave-v3-ethereum",
                 asset_symbol="WETH",
@@ -123,9 +153,7 @@ class TestReserveSnapshotRepository:
                 borrowed_value_usd=None,
                 utilization=Decimal("0.4"),
                 rate_model=None,
-            )
-            for hour in range(24)
-        ]
+            ))
 
         repository.upsert_snapshots(snapshots)
 
@@ -155,8 +183,14 @@ class TestReserveSnapshotRepository:
         assert len(results) == 0
 
     def test_snapshot_with_null_usd_values(self, repository):
+        # 2023-11-14 22:00:00 UTC
+        ts = 1699999200
         snapshot = ReserveSnapshot(
-            timestamp_hour=datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc),
+            timestamp=ts,
+            timestamp_hour=truncate_to_hour(ts),
+            timestamp_day=truncate_to_day(ts),
+            timestamp_week=truncate_to_week(ts),
+            timestamp_month=truncate_to_month(ts),
             chain_id="ethereum",
             market_id="aave-v3-ethereum",
             asset_symbol="WETH",
@@ -206,9 +240,17 @@ class TestReserveSnapshotRepository:
         assert abs(result.rate_model.variable_rate_slope2 - Decimal("0.75")) < Decimal("1e-15")
 
     def test_get_latest_per_asset(self, repository):
+        # Base timestamp: 2020-01-01 00:00:00 UTC
+        base_ts = 1577836800
+
         def make_snapshot(hour: int, addr: str) -> ReserveSnapshot:
+            ts = base_ts + hour * 3600
             return ReserveSnapshot(
-                timestamp_hour=datetime(2020, 1, 1, hour, 0, 0, tzinfo=timezone.utc),
+                timestamp=ts,
+                timestamp_hour=truncate_to_hour(ts),
+                timestamp_day=truncate_to_day(ts),
+                timestamp_week=truncate_to_week(ts),
+                timestamp_month=truncate_to_month(ts),
                 chain_id="chain_1",
                 market_id="market_1",
                 asset_symbol="SYM",

@@ -5,71 +5,55 @@ import pytest
 
 from services.api.src.api.adapters.aave_v3.transformer import (
     TransformationError,
-    round_timestamp_to_interval,
     transform_history_item_to_snapshot,
     transform_rate_strategy,
     transform_reserve_to_snapshot,
 )
 from services.api.src.api.domain.models import RateModelParams
+from services.api.src.api.utils.timestamps import (
+    truncate_to_day,
+    truncate_to_hour,
+    truncate_to_month,
+    truncate_to_week,
+)
 
 
-class TestRoundTimestampToInterval:
-    """Tests for round_timestamp_to_interval function."""
+class TestTimestampTruncation:
+    """Tests for timestamp truncation utilities."""
 
-    def test_hourly_interval_rounds_down(self):
+    def test_truncate_to_hour(self):
         # 22:25:25 -> 22:00:00
         ts = 1700000725  # 2023-11-14 22:25:25 UTC
-        result = round_timestamp_to_interval(ts, 3600)
+        result = truncate_to_hour(ts)
         expected = datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc)
         assert result == expected
 
-    def test_hourly_interval_exact_hour(self):
+    def test_truncate_to_hour_exact(self):
         # 22:00:00 -> 22:00:00
         ts = 1699999200  # 2023-11-14 22:00:00 UTC
-        result = round_timestamp_to_interval(ts, 3600)
+        result = truncate_to_hour(ts)
         expected = datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc)
         assert result == expected
 
-    def test_10min_interval_rounds_down(self):
-        # 22:25:25 -> 22:20:00
-        ts = 1700000725  # 2023-11-14 22:25:25 UTC
-        result = round_timestamp_to_interval(ts, 600)
-        expected = datetime(2023, 11, 14, 22, 20, 0, tzinfo=timezone.utc)
-        assert result == expected
-
-    def test_10min_interval_at_boundary(self):
-        # 22:20:00 -> 22:20:00
-        ts = 1700000400  # 2023-11-14 22:20:00 UTC
-        result = round_timestamp_to_interval(ts, 600)
-        expected = datetime(2023, 11, 14, 22, 20, 0, tzinfo=timezone.utc)
-        assert result == expected
-
-    def test_30min_interval_rounds_down(self):
-        # 22:25:25 -> 22:00:00 (rounds to 30-min boundary)
-        ts = 1700000725  # 2023-11-14 22:25:25 UTC
-        result = round_timestamp_to_interval(ts, 1800)
-        expected = datetime(2023, 11, 14, 22, 0, 0, tzinfo=timezone.utc)
-        assert result == expected
-
-    def test_30min_interval_second_half(self):
-        # 22:45:00 -> 22:30:00
-        ts = 1700001900  # 2023-11-14 22:45:00 UTC
-        result = round_timestamp_to_interval(ts, 1800)
-        expected = datetime(2023, 11, 14, 22, 30, 0, tzinfo=timezone.utc)
-        assert result == expected
-
-    def test_6hour_interval_rounds_down(self):
-        # 22:25:25 -> 18:00:00
-        ts = 1700000725  # 2023-11-14 22:25:25 UTC
-        result = round_timestamp_to_interval(ts, 21600)
-        expected = datetime(2023, 11, 14, 18, 0, 0, tzinfo=timezone.utc)
-        assert result == expected
-
-    def test_daily_interval_rounds_down(self):
+    def test_truncate_to_day(self):
         # 22:25:25 -> 00:00:00 same day
         ts = 1700000725  # 2023-11-14 22:25:25 UTC
-        result = round_timestamp_to_interval(ts, 86400)
+        result = truncate_to_day(ts)
         expected = datetime(2023, 11, 14, 0, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_truncate_to_week_monday(self):
+        # 2023-11-14 is Tuesday -> Monday 2023-11-13
+        ts = 1700000725  # 2023-11-14 22:25:25 UTC (Tuesday)
+        result = truncate_to_week(ts)
+        expected = datetime(2023, 11, 13, 0, 0, 0, tzinfo=timezone.utc)  # Monday
+        assert result == expected
+
+    def test_truncate_to_month(self):
+        # 2023-11-14 -> 2023-11-01
+        ts = 1700000725  # 2023-11-14 22:25:25 UTC
+        result = truncate_to_month(ts)
+        expected = datetime(2023, 11, 1, 0, 0, 0, tzinfo=timezone.utc)
         assert result == expected
 
 
