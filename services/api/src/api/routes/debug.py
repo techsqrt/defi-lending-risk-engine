@@ -1,5 +1,6 @@
 """Debug API endpoints for inspecting recent data."""
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -13,6 +14,24 @@ from services.api.src.api.db.models import protocol_events, reserve_snapshots_ho
 from services.api.src.api.db.repository import ReserveSnapshotRepository
 
 router = APIRouter(prefix="/debug", tags=["debug"])
+
+
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    """Ensure datetime is UTC-aware. SQLite returns naive datetimes."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        # Naive datetime from SQLite - treat as UTC
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _iso_utc(dt: datetime | None) -> str | None:
+    """Convert datetime to ISO string with UTC timezone."""
+    if dt is None:
+        return None
+    utc_dt = _ensure_utc(dt)
+    return utc_dt.isoformat() if utc_dt else None
 
 
 def get_db_engine() -> Engine:
@@ -143,8 +162,8 @@ def row_to_snapshot_dict(row: Any) -> dict[str, Any]:
     """Convert a database row to snapshot dict."""
     return {
         "timestamp": row.timestamp,
-        "timestamp_hour": row.timestamp_hour.isoformat() if row.timestamp_hour else None,
-        "timestamp_day": row.timestamp_day.isoformat() if row.timestamp_day else None,
+        "timestamp_hour": _iso_utc(row.timestamp_hour),
+        "timestamp_day": _iso_utc(row.timestamp_day),
         "chain_id": row.chain_id,
         "market_id": row.market_id,
         "asset_symbol": row.asset_symbol,
@@ -167,7 +186,7 @@ def row_to_event_dict(row: Any) -> dict[str, Any]:
         "chain_id": row.chain_id,
         "event_type": row.event_type,
         "timestamp": row.timestamp,
-        "timestamp_hour": row.timestamp_hour.isoformat() if row.timestamp_hour else None,
+        "timestamp_hour": _iso_utc(row.timestamp_hour),
         "tx_hash": row.tx_hash,
         "user_address": row.user_address,
         "liquidator_address": row.liquidator_address,
