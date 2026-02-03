@@ -158,6 +158,48 @@ class TestTransformLiquidation:
         assert event.collateral_asset_symbol == "WETH"
         assert event.collateral_amount == Decimal("50")
 
+    def test_stores_prices_in_metadata(self):
+        raw = {
+            "id": "1",
+            "timestamp": "100",
+            "user": {"id": "0x1"},
+            "liquidator": "0x2",
+            "principalAmount": "1000000",  # 1 USDC (6 decimals)
+            "principalReserve": {"symbol": "USDC", "underlyingAsset": "0xusdc", "decimals": "6"},
+            "collateralAmount": "500000000000000000",  # 0.5 WETH (18 decimals)
+            "collateralReserve": {"symbol": "WETH", "underlyingAsset": "0xweth", "decimals": "18"},
+            "collateralAssetPriceUSD": "2000",
+            "borrowAssetPriceUSD": "1",
+        }
+
+        event = transform_liquidation(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["collateral_price_usd"] == "2000"
+        assert event.metadata["borrow_price_usd"] == "1"
+        assert event.metadata["collateral_decimals"] == 18
+
+    def test_computes_usd_values_from_prices(self):
+        raw = {
+            "id": "1",
+            "timestamp": "100",
+            "user": {"id": "0x1"},
+            "liquidator": "0x2",
+            "principalAmount": "1000000",  # 1 USDC (6 decimals)
+            "principalReserve": {"symbol": "USDC", "underlyingAsset": "0xusdc", "decimals": "6"},
+            "collateralAmount": "500000000000000000",  # 0.5 WETH (18 decimals)
+            "collateralReserve": {"symbol": "WETH", "underlyingAsset": "0xweth", "decimals": "18"},
+            "collateralAssetPriceUSD": "2000",
+            "borrowAssetPriceUSD": "1",
+        }
+
+        event = transform_liquidation(raw, "base")
+
+        # Principal: 1 USDC * $1 = $1
+        assert event.amount_usd == Decimal("1")
+        # Collateral: 0.5 WETH * $2000 = $1000
+        assert Decimal(event.metadata["collateral_amount_usd"]) == Decimal("1000")
+
 
 class TestTransformFlashloan:
 
@@ -175,6 +217,42 @@ class TestTransformFlashloan:
 
         assert event.user_address == "0xflasher"
         assert event.event_type == "flashloan"
+
+    def test_stores_fees_in_metadata(self):
+        raw = {
+            "id": "1",
+            "timestamp": "100",
+            "amount": "1000000000000000000000",  # 1000 tokens
+            "assetPriceUSD": "1",
+            "initiator": {"id": "0xflasher"},
+            "target": "0xtargetcontract",
+            "totalFee": "900000000000000000",  # 0.9 tokens
+            "lpFee": "630000000000000000",  # 0.63 tokens (70% of total)
+            "protocolFee": "270000000000000000",  # 0.27 tokens (30% of total)
+            "reserve": {"symbol": "USDC", "underlyingAsset": "0xusdc", "decimals": "18"},
+        }
+
+        event = transform_flashloan(raw, "base")
+
+        assert event.metadata is not None
+        assert event.metadata["target"] == "0xtargetcontract"
+        assert event.metadata["total_fee"] == "900000000000000000"
+        assert event.metadata["lp_fee"] == "630000000000000000"
+        assert event.metadata["protocol_fee"] == "270000000000000000"
+
+    def test_metadata_is_none_when_no_extra_fields(self):
+        raw = {
+            "id": "1",
+            "timestamp": "100",
+            "amount": "1000",
+            "assetPriceUSD": "10",
+            "initiator": {"id": "0xflasher"},
+            "reserve": {"symbol": "TKN", "underlyingAsset": "0x", "decimals": "18"},
+        }
+
+        event = transform_flashloan(raw, "base")
+
+        assert event.metadata is None
 
 
 class TestIngestEventType:
@@ -197,6 +275,7 @@ class TestIngestEventType:
             timestamp_day=truncate_to_day(ts),
             timestamp_week=truncate_to_week(ts),
             timestamp_month=truncate_to_month(ts),
+            tx_hash=None,
             user_address="0x",
             liquidator_address=None,
             asset_address="0x",

@@ -168,6 +168,7 @@ def row_to_event_dict(row: Any) -> dict[str, Any]:
         "event_type": row.event_type,
         "timestamp": row.timestamp,
         "timestamp_hour": row.timestamp_hour.isoformat() if row.timestamp_hour else None,
+        "tx_hash": row.tx_hash,
         "user_address": row.user_address,
         "liquidator_address": row.liquidator_address,
         "asset_address": row.asset_address,
@@ -179,6 +180,7 @@ def row_to_event_dict(row: Any) -> dict[str, Any]:
         "collateral_asset_symbol": row.collateral_asset_symbol,
         "collateral_amount": str(row.collateral_amount) if row.collateral_amount else None,
         "borrow_rate": str(row.borrow_rate) if row.borrow_rate else None,
+        "metadata": row.metadata,
     }
 
 

@@ -102,6 +102,8 @@ class ProtocolEvent:
     timestamp_day: datetime
     timestamp_week: datetime
     timestamp_month: datetime
+    # Transaction info
+    tx_hash: Optional[str]  # transaction hash (extracted from subgraph ID)
     # User info
     user_address: str  # main user (depositor/borrower/liquidated)
     liquidator_address: Optional[str]  # only for liquidations
@@ -117,3 +119,7 @@ class ProtocolEvent:
     collateral_amount: Optional[Decimal] = None
     # Borrow-specific
     borrow_rate: Optional[Decimal] = None  # RAY-scaled rate
+    # Extra event-specific data (stored as JSON)
+    # For liquidations: collateralAssetPriceUSD, borrowAssetPriceUSD, collateralDecimals
+    # For flashloans: target, totalFee, lpFee, protocolFee
+    metadata: Optional[dict] = None

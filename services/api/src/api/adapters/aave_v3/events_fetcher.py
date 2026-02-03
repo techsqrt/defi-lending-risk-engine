@@ -98,6 +98,8 @@ query GetLiquidations($from: Int!, $skip: Int!) {
     collateralReserve { symbol underlyingAsset decimals }
     principalAmount
     principalReserve { symbol underlyingAsset decimals }
+    collateralAssetPriceUSD
+    borrowAssetPriceUSD
   }
 }
 """,
@@ -115,6 +117,10 @@ query GetFlashLoans($from: Int!, $skip: Int!) {
     amount
     assetPriceUSD
     initiator { id }
+    target
+    totalFee
+    lpFee
+    protocolFee
     reserve { symbol underlyingAsset decimals }
   }
 }

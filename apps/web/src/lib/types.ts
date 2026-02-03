@@ -98,12 +98,27 @@ export interface DebugSnapshotsResponse {
   oldest: DebugSnapshotData | null;
 }
 
+export interface LiquidationMetadata {
+  collateral_price_usd?: string;
+  borrow_price_usd?: string;
+  collateral_decimals?: number;
+  collateral_amount_usd?: string;
+}
+
+export interface FlashloanMetadata {
+  target?: string;
+  total_fee?: string;
+  lp_fee?: string;
+  protocol_fee?: string;
+}
+
 export interface DebugEventData {
   id: string;
   chain_id: string;
   event_type: string;
   timestamp: number;
   timestamp_hour: string | null;
+  tx_hash: string | null;
   user_address: string;
   liquidator_address: string | null;
   asset_address: string;
@@ -115,6 +130,7 @@ export interface DebugEventData {
   collateral_asset_symbol: string | null;
   collateral_amount: string | null;
   borrow_rate: string | null;
+  metadata: LiquidationMetadata | FlashloanMetadata | null;
 }
 
 export interface DebugEventsResponse {

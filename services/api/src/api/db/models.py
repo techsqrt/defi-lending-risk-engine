@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Column,
     DateTime,
@@ -70,6 +71,8 @@ protocol_events = Table(
     Column("timestamp_day", DateTime(timezone=True), nullable=False),
     Column("timestamp_week", DateTime(timezone=True), nullable=False),
     Column("timestamp_month", DateTime(timezone=True), nullable=False),
+    # Transaction info
+    Column("tx_hash", String(66), nullable=True),
     # User info
     Column("user_address", String(100), nullable=False),
     Column("liquidator_address", String(100), nullable=True),
@@ -85,7 +88,9 @@ protocol_events = Table(
     Column("collateral_amount", Numeric(78, 0), nullable=True),
     # Borrow-specific
     Column("borrow_rate", Numeric(38, 0), nullable=True),
-    # Metadata
+    # Extra event-specific data (JSON)
+    Column("metadata", JSON, nullable=True),
+    # Row metadata
     Column("created_at", DateTime(timezone=True), nullable=True),
     Index("idx_events_cursor", "chain_id", "event_type", "timestamp"),
     Index("idx_events_user", "user_address", "timestamp"),
