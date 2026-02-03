@@ -48,3 +48,4 @@ yarn-error.log*
 # Poetry
 # poetry.lock should be committed for reproducible builds
 local.db
+apps/web/tsconfig.tsbuildinfo
