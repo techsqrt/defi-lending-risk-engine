@@ -236,12 +236,13 @@ def get_asset_snapshots_debug(
 def get_asset_events_debug(
     chain_id: str,
     asset_address: str,
-    event_type: str | None = Query(default=None, description="Filter by event type"),
+    event_types: str | None = Query(default=None, description="Filter by event types (comma-separated)"),
     limit: int = Query(default=10, ge=1, le=100, description="Number of latest events"),
     engine: Engine = Depends(get_db_engine),
 ) -> dict[str, Any]:
     """
     Get latest and earliest events for a specific asset with optional filtering.
+    Supports multiple event types via comma-separated list.
     """
     asset_addr = asset_address.lower()
 
@@ -251,8 +252,12 @@ def get_asset_events_debug(
             protocol_events.c.chain_id == chain_id,
             protocol_events.c.asset_address == asset_addr,
         ]
-        if event_type:
-            conditions.append(protocol_events.c.event_type == event_type)
+        # Support comma-separated event types
+        event_type_list: list[str] | None = None
+        if event_types:
+            event_type_list = [t.strip() for t in event_types.split(",") if t.strip()]
+            if event_type_list:
+                conditions.append(protocol_events.c.event_type.in_(event_type_list))
 
         # Get latest events
         latest_stmt = (
@@ -283,7 +288,7 @@ def get_asset_events_debug(
     return {
         "chain_id": chain_id,
         "asset_address": asset_addr,
-        "event_type_filter": event_type,
+        "event_type_filter": event_type_list,
         "total_matching_events": total_count,
         "latest": [row_to_event_dict(r) for r in latest_rows],
         "earliest": [row_to_event_dict(r) for r in earliest_rows],

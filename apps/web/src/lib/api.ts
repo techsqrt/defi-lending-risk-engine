@@ -64,11 +64,13 @@ export async function fetchDebugSnapshots(
 export async function fetchDebugEvents(
   chainId: string,
   assetAddress: string,
-  eventType?: string,
+  eventTypes?: string[],
   limit: number = 10
 ): Promise<DebugEventsResponse> {
   const params = new URLSearchParams();
-  if (eventType) params.set('event_type', eventType);
+  if (eventTypes && eventTypes.length > 0) {
+    params.set('event_types', eventTypes.join(','));
+  }
   params.set('limit', limit.toString());
 
   const res = await fetch(
