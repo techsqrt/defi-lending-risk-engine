@@ -7,10 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
 
-from services.api.src.api.db.models import (
-    reserve_rate_model_params,
-    reserve_snapshots_hourly,
-)
+from services.api.src.api.db.models import reserve_snapshots_hourly
 from services.api.src.api.domain.models import RateModelParams, ReserveSnapshot
 
 
@@ -27,7 +24,11 @@ class ReserveSnapshotRepository:
         for s in snapshots:
             row = {
                 "id": str(uuid.uuid4()),
+                "timestamp": s.timestamp,
                 "timestamp_hour": s.timestamp_hour,
+                "timestamp_day": s.timestamp_day,
+                "timestamp_week": s.timestamp_week,
+                "timestamp_month": s.timestamp_month,
                 "chain_id": s.chain_id,
                 "market_id": s.market_id,
                 "asset_symbol": s.asset_symbol,
@@ -51,7 +52,6 @@ class ReserveSnapshotRepository:
                 "variable_rate_slope2": (
                     s.rate_model.variable_rate_slope2 if s.rate_model else None
                 ),
-                # New fields
                 "variable_borrow_rate": s.variable_borrow_rate,
                 "liquidity_rate": s.liquidity_rate,
                 "stable_borrow_rate": s.stable_borrow_rate,
@@ -72,6 +72,10 @@ class ReserveSnapshotRepository:
         stmt = stmt.on_conflict_do_update(
             constraint="uq_snapshot_key",
             set_={
+                "timestamp": stmt.excluded.timestamp,
+                "timestamp_day": stmt.excluded.timestamp_day,
+                "timestamp_week": stmt.excluded.timestamp_week,
+                "timestamp_month": stmt.excluded.timestamp_month,
                 "borrow_cap": stmt.excluded.borrow_cap,
                 "supply_cap": stmt.excluded.supply_cap,
                 "supplied_amount": stmt.excluded.supplied_amount,
@@ -101,6 +105,10 @@ class ReserveSnapshotRepository:
                 "timestamp_hour", "chain_id", "market_id", "asset_address"
             ],
             set_={
+                "timestamp": stmt.excluded.timestamp,
+                "timestamp_day": stmt.excluded.timestamp_day,
+                "timestamp_week": stmt.excluded.timestamp_week,
+                "timestamp_month": stmt.excluded.timestamp_month,
                 "borrow_cap": stmt.excluded.borrow_cap,
                 "supply_cap": stmt.excluded.supply_cap,
                 "supplied_amount": stmt.excluded.supplied_amount,
@@ -134,7 +142,11 @@ class ReserveSnapshotRepository:
                 variable_rate_slope2=row.variable_rate_slope2,
             )
         return ReserveSnapshot(
+            timestamp=row.timestamp,
             timestamp_hour=row.timestamp_hour,
+            timestamp_day=row.timestamp_day,
+            timestamp_week=row.timestamp_week,
+            timestamp_month=row.timestamp_month,
             chain_id=row.chain_id,
             market_id=row.market_id,
             asset_symbol=row.asset_symbol,
@@ -147,12 +159,12 @@ class ReserveSnapshotRepository:
             borrowed_value_usd=row.borrowed_value_usd,
             utilization=row.utilization,
             rate_model=rate_model,
-            variable_borrow_rate=getattr(row, "variable_borrow_rate", None),
-            liquidity_rate=getattr(row, "liquidity_rate", None),
-            stable_borrow_rate=getattr(row, "stable_borrow_rate", None),
-            price_usd=getattr(row, "price_usd", None),
-            price_eth=getattr(row, "price_eth", None),
-            available_liquidity=getattr(row, "available_liquidity", None),
+            variable_borrow_rate=row.variable_borrow_rate,
+            liquidity_rate=row.liquidity_rate,
+            stable_borrow_rate=row.stable_borrow_rate,
+            price_usd=row.price_usd,
+            price_eth=row.price_eth,
+            available_liquidity=row.available_liquidity,
         )
 
     def get_snapshots(
@@ -254,7 +266,7 @@ class ReserveSnapshotRepository:
 
     def get_max_timestamp(self, chain_id: str, asset_address: str) -> int | None:
         """
-        Get the latest timestamp for cursor-based fetching.
+        Get the latest raw timestamp for cursor-based fetching.
 
         Args:
             chain_id: Chain identifier (e.g., 'ethereum', 'base')
@@ -264,7 +276,7 @@ class ReserveSnapshotRepository:
             The maximum timestamp (unix) for this chain/asset, or None if no data
         """
         stmt = (
-            select(func.max(reserve_snapshots_hourly.c.timestamp_hour))
+            select(func.max(reserve_snapshots_hourly.c.timestamp))
             .where(reserve_snapshots_hourly.c.chain_id == chain_id)
             .where(reserve_snapshots_hourly.c.asset_address == asset_address)
         )
@@ -274,58 +286,4 @@ class ReserveSnapshotRepository:
             row = result.fetchone()
             if row is None or row[0] is None:
                 return None
-            return int(row[0].timestamp())
-
-
-class RateModelParamsRepository:
-    def __init__(self, engine: Engine):
-        self.engine = engine
-        self._is_sqlite = "sqlite" in str(engine.url)
-
-    def upsert_rate_model(
-        self,
-        chain_id: str,
-        market_id: str,
-        asset_address: str,
-        valid_from: datetime,
-        params: RateModelParams,
-    ) -> None:
-        row = {
-            "id": str(uuid.uuid4()),
-            "chain_id": chain_id,
-            "market_id": market_id,
-            "asset_address": asset_address,
-            "valid_from": valid_from,
-            "valid_to": None,
-            "optimal_utilization_rate": params.optimal_utilization_rate,
-            "base_variable_borrow_rate": params.base_variable_borrow_rate,
-            "variable_rate_slope1": params.variable_rate_slope1,
-            "variable_rate_slope2": params.variable_rate_slope2,
-        }
-
-        with self.engine.begin() as conn:
-            if self._is_sqlite:
-                stmt = sqlite_insert(reserve_rate_model_params).values([row])
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[
-                        "chain_id", "market_id", "asset_address", "valid_from"
-                    ],
-                    set_={
-                        "optimal_utilization_rate": stmt.excluded.optimal_utilization_rate,
-                        "base_variable_borrow_rate": stmt.excluded.base_variable_borrow_rate,
-                        "variable_rate_slope1": stmt.excluded.variable_rate_slope1,
-                        "variable_rate_slope2": stmt.excluded.variable_rate_slope2,
-                    },
-                )
-            else:
-                stmt = pg_insert(reserve_rate_model_params).values([row])
-                stmt = stmt.on_conflict_do_update(
-                    constraint="uq_rate_model_key",
-                    set_={
-                        "optimal_utilization_rate": stmt.excluded.optimal_utilization_rate,
-                        "base_variable_borrow_rate": stmt.excluded.base_variable_borrow_rate,
-                        "variable_rate_slope1": stmt.excluded.variable_rate_slope1,
-                        "variable_rate_slope2": stmt.excluded.variable_rate_slope2,
-                    },
-                )
-            conn.execute(stmt)
+            return int(row[0])

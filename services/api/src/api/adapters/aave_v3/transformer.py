@@ -1,8 +1,13 @@
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from services.api.src.api.domain.models import RateModelParams, ReserveSnapshot
+from services.api.src.api.utils.timestamps import (
+    truncate_to_day,
+    truncate_to_hour,
+    truncate_to_month,
+    truncate_to_week,
+)
 
 RAY = Decimal("1e27")
 WAD = Decimal("1e18")
@@ -31,24 +36,6 @@ def _to_decimal(value: str | int | None, scale: Decimal = WAD) -> Decimal:
     if value is None:
         return Decimal("0")
     return Decimal(str(value)) / scale
-
-
-def _timestamp_to_hour(ts: int) -> datetime:
-    """Round timestamp down to the nearest hour."""
-    hour_ts = (ts // 3600) * 3600
-    return datetime.fromtimestamp(hour_ts, tz=timezone.utc)
-
-
-def round_timestamp_to_interval(ts: int, interval_seconds: int) -> datetime:
-    """Round timestamp down to the nearest interval boundary.
-
-    Examples:
-        - interval=3600 (1h): 13:45:25 -> 13:00:00
-        - interval=600 (10m): 13:45:25 -> 13:40:00
-        - interval=1800 (30m): 13:45:25 -> 13:30:00
-    """
-    rounded_ts = (ts // interval_seconds) * interval_seconds
-    return datetime.fromtimestamp(rounded_ts, tz=timezone.utc)
 
 
 def transform_reserve_to_snapshot(
@@ -113,7 +100,11 @@ def transform_reserve_to_snapshot(
         )
 
     return ReserveSnapshot(
-        timestamp_hour=_timestamp_to_hour(ts),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         chain_id=chain_id,
         market_id=market_id,
         asset_symbol=symbol,
@@ -148,7 +139,7 @@ def transform_history_item_to_snapshot(
     decimals = int(_get_field(reserve, "decimals"))
     asset_scale = Decimal(10) ** decimals
 
-    timestamp = int(_get_field(item, "timestamp"))
+    ts = int(_get_field(item, "timestamp"))
     total_liquidity = _to_decimal(_get_field(item, "totalLiquidity"), asset_scale)
     variable_debt = _to_decimal(_get_field(item, "totalCurrentVariableDebt"), asset_scale)
     stable_debt = _to_decimal(_get_field(item, "totalPrincipalStableDebt"), asset_scale)
@@ -203,7 +194,11 @@ def transform_history_item_to_snapshot(
     utilization = ReserveSnapshot.compute_utilization(supplied_amount, borrowed_amount)
 
     return ReserveSnapshot(
-        timestamp_hour=_timestamp_to_hour(timestamp),
+        timestamp=ts,
+        timestamp_hour=truncate_to_hour(ts),
+        timestamp_day=truncate_to_day(ts),
+        timestamp_week=truncate_to_week(ts),
+        timestamp_month=truncate_to_month(ts),
         chain_id=chain_id,
         market_id=market_id,
         asset_symbol=symbol,
@@ -222,7 +217,6 @@ def transform_history_item_to_snapshot(
         price_usd=price_usd,
         price_eth=price_eth,
         available_liquidity=available_liquidity,
-        raw_timestamp=timestamp,
     )
 
 

@@ -52,7 +52,13 @@ class RateModelParams:
 
 @dataclass
 class ReserveSnapshot:
+    # Raw timestamp (unix seconds UTC)
+    timestamp: int
+    # Truncated timestamps (all floor to period start, pure UTC)
     timestamp_hour: datetime
+    timestamp_day: datetime
+    timestamp_week: datetime
+    timestamp_month: datetime
     chain_id: str
     market_id: str
     asset_symbol: str
@@ -74,8 +80,6 @@ class ReserveSnapshot:
     price_eth: Optional[Decimal] = None
     # Available liquidity
     available_liquidity: Optional[Decimal] = None
-    # Raw timestamp from subgraph (used for deduplication)
-    raw_timestamp: Optional[int] = None
 
     @staticmethod
     def compute_utilization(supplied: Decimal, borrowed: Decimal) -> Decimal:
@@ -91,7 +95,13 @@ class ProtocolEvent:
     id: str  # subgraph event ID
     chain_id: str
     event_type: str  # 'supply', 'withdraw', 'borrow', 'repay', 'liquidation', 'flashloan'
+    # Raw timestamp (unix seconds UTC)
     timestamp: int
+    # Truncated timestamps (all floor to period start, pure UTC)
+    timestamp_hour: datetime
+    timestamp_day: datetime
+    timestamp_week: datetime
+    timestamp_month: datetime
     # User info
     user_address: str  # main user (depositor/borrower/liquidated)
     liquidator_address: Optional[str]  # only for liquidations
