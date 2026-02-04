@@ -198,18 +198,28 @@ export interface ReserveConfig {
   liquidation_threshold: number;
   liquidation_bonus: number;
   price_usd: number;
+  total_collateral_usd?: number;
+  total_debt_usd?: number;
+}
+
+export interface DataSourceInfo {
+  price_source: string;
+  oracle_address: string;
+  rpc_url: string;
+  snapshot_time_utc: string;
 }
 
 export interface HealthFactorSummary {
   chain_id: string;
+  data_source: DataSourceInfo;
   total_users: number;
   users_with_debt: number;
   users_at_risk: number;
-  users_liquidatable: number;
+  users_excluded: number;  // HF < 1.0 users (excluded from stats)
   total_collateral_usd: number;
   total_debt_usd: number;
   distribution: HealthFactorDistribution[];
-  high_risk_users: UserHealthFactor[];
+  at_risk_users: UserHealthFactor[];  // HF 1.0-1.5, sorted by lowest HF
   reserve_configs: ReserveConfig[];
 }
 
