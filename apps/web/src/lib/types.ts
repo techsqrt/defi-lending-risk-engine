@@ -164,3 +164,86 @@ export interface DebugStatsResponse {
   };
   by_event_type: Record<string, EventTypeStats>;
 }
+
+// Health Factor types
+export interface UserPosition {
+  asset_symbol: string;
+  asset_address: string;
+  collateral_usd: number;
+  debt_usd: number;
+  liquidation_threshold: number;
+  is_collateral_enabled: boolean;
+}
+
+export interface UserHealthFactor {
+  user_address: string;
+  health_factor: number | null;
+  total_collateral_usd: number;
+  total_debt_usd: number;
+  is_liquidatable: boolean;
+  positions: UserPosition[];
+}
+
+export interface HealthFactorDistribution {
+  bucket: string;
+  count: number;
+  total_collateral_usd: number;
+  total_debt_usd: number;
+}
+
+export interface ReserveConfig {
+  symbol: string;
+  address: string;
+  ltv: number;
+  liquidation_threshold: number;
+  liquidation_bonus: number;
+  price_usd: number;
+}
+
+export interface HealthFactorSummary {
+  chain_id: string;
+  total_users: number;
+  users_with_debt: number;
+  users_at_risk: number;
+  users_liquidatable: number;
+  total_collateral_usd: number;
+  total_debt_usd: number;
+  distribution: HealthFactorDistribution[];
+  high_risk_users: UserHealthFactor[];
+  reserve_configs: ReserveConfig[];
+}
+
+export interface LiquidationSimulation {
+  price_drop_percent: number;
+  asset_symbol: string;
+  asset_address: string;
+  original_price_usd: number;
+  simulated_price_usd: number;
+  users_at_risk: number;
+  users_liquidatable: number;
+  total_collateral_at_risk_usd: number;
+  total_debt_at_risk_usd: number;
+  close_factor: number;
+  liquidation_bonus: number;
+  estimated_liquidatable_debt_usd: number;
+  estimated_liquidator_profit_usd: number;
+  affected_users: Array<{
+    user_address: string;
+    hf_before: number | null;
+    hf_after: number;
+    collateral_usd: number;
+    debt_usd: number;
+  }>;
+}
+
+export interface SimulationScenario {
+  drop_1_percent: LiquidationSimulation;
+  drop_3_percent: LiquidationSimulation;
+  drop_5_percent: LiquidationSimulation;
+  drop_10_percent: LiquidationSimulation;
+}
+
+export interface HealthFactorAnalysis {
+  summary: HealthFactorSummary;
+  weth_simulation: SimulationScenario | null;
+}

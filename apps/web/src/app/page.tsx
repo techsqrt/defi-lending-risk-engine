@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { fetchOverview } from '@/lib/api';
 import type { OverviewResponse } from '@/lib/types';
 import { ChainTabs } from './components/ChainTabs';
@@ -219,6 +220,33 @@ export default function Home() {
         activeChain={activeChain}
         onChainChange={setActiveChain}
       />
+
+      {/* Health Factor Analysis Link */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'flex-end',
+        marginBottom: '16px',
+      }}>
+        <Link
+          href={`/health-factors/${activeChain}`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 20px',
+            background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+            color: 'white',
+            borderRadius: '8px',
+            textDecoration: 'none',
+            fontWeight: '600',
+            fontSize: '14px',
+            transition: 'transform 0.1s ease',
+          }}
+        >
+          <span>Health Factor Analysis</span>
+          <span style={{ fontSize: '18px' }}>&rarr;</span>
+        </Link>
+      </div>
 
       {activeChainData && (
         <div>
