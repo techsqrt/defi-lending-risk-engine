@@ -243,30 +243,33 @@ export default function AssetDetailsPage() {
   const periodConfig = getPeriodConfig(timePeriod);
   const isDaily = periodConfig.granularity === 'day';
 
-  // Format datetime in UTC - always include short date + time
-  const formatUTCDateTime = (isoString: string): string => {
+  // Format datetime in UTC - always show full "Feb 1, 12:00 AM" format
+  // For daily granularity, normalize to midnight (00:00) since each point represents a day
+  const formatUTCDateTime = (isoString: string, normalizeToMidnight: boolean): string => {
     // Parse ISO string and extract UTC components directly
     // ISO format: "2026-02-01T00:00:00+00:00" or "2026-02-01T00:00:00Z"
     const match = isoString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
     if (!match) return isoString;
 
-    const [, year, monthStr, dayStr, hourStr, minStr] = match;
+    const [, , monthStr, dayStr, hourStr, minStr] = match;
     const month = parseInt(monthStr, 10);
     const day = parseInt(dayStr, 10);
-    const hour = parseInt(hourStr, 10);
+
+    // For daily data, always show midnight; for hourly data, show actual time
+    const hour = normalizeToMidnight ? 0 : parseInt(hourStr, 10);
+    const minute = normalizeToMidnight ? '00' : minStr;
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthName = monthNames[month - 1];
     const hour12 = hour % 12 || 12;
     const ampm = hour >= 12 ? 'PM' : 'AM';
 
-    return `${monthName} ${day}, ${hour12}:${minStr} ${ampm}`;
+    return `${monthName} ${day}, ${hour12}:${minute} ${ampm}`;
   };
 
   // Build chart data with full datetime labels (all in UTC)
   const chartData: ChartDataPoint[] = history.snapshots.map((s) => {
-    // Always show full date + time: "Feb 1, 12:00 AM"
-    const timeLabel = formatUTCDateTime(s.timestamp_hour);
+    const timeLabel = formatUTCDateTime(s.timestamp_hour, isDaily);
     const fullTimeLabel = `${timeLabel} UTC`;
 
     return {
