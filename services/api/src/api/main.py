@@ -65,16 +65,15 @@ async def lifespan(app: FastAPI):
         from services.api.src.api.db.migrate import run_migrations
         run_migrations()
 
-    # Start ingestion scheduler (snapshots + events)
+    # Start ingestion scheduler (snapshots + events) - runs at the top of each hour
     if os.getenv("ENABLE_EVENT_INGESTION", "true").lower() == "true":
-        interval_hours = int(os.getenv("EVENT_INGESTION_INTERVAL_HOURS", "1"))
-        logger.info(f"Starting ingestion scheduler (every {interval_hours}h)")
+        logger.info("Starting ingestion scheduler (every hour at :00)")
 
         scheduler = BackgroundScheduler()
         scheduler.add_job(
             run_ingestion,
-            "interval",
-            hours=interval_hours,
+            "cron",
+            minute=0,  # Run at the top of every hour
             id="ingestion",
             name="Aave V3 Ingestion (Snapshots + Events)",
         )

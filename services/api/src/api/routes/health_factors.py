@@ -1,28 +1,15 @@
 """Health factor analysis API routes."""
 
 import logging
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Any
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from services.api.src.api.adapters.aave_v3.config import get_default_config, require_api_key
-from services.api.src.api.adapters.aave_v3.user_reserves_fetcher import (
-    AAVE_ORACLE_ADDRESSES,
-    UserReservesFetcher,
-    get_rpc_url,
-)
+from services.api.src.api.adapters.aave_v3.config import get_default_config
 from services.api.src.api.db.engine import get_engine
-from services.api.src.api.domain.health_factor import (
-    LiquidationSimulation,
-    UserHealthFactor,
-    parse_user_reserves,
-    simulate_liquidations,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -133,206 +120,15 @@ def get_db_engine() -> Engine:
     return get_engine()
 
 
-def _get_latest_snapshot_from_db(
-    engine: Engine,
-    chain_id: str,
-) -> tuple[datetime | None, list[HealthFactorDistribution]]:
-    """
-    Get the latest HF distribution snapshot from the database.
-
-    Returns:
-        Tuple of (snapshot_time, distribution list) or (None, []) if no data
-    """
-    with engine.connect() as conn:
-        # Get the latest snapshot time for this chain
-        result = conn.execute(
-            text("""
-                SELECT MAX(snapshot_time)
-                FROM health_factor_snapshots
-                WHERE chain_id = :chain_id
-            """),
-            {"chain_id": chain_id},
-        )
-        row = result.fetchone()
-        if row is None or row[0] is None:
-            return None, []
-
-        snapshot_time = row[0]
-
-        # Get all bucket data for this snapshot
-        result = conn.execute(
-            text("""
-                SELECT bucket, user_count, total_collateral_usd, total_debt_usd
-                FROM health_factor_snapshots
-                WHERE chain_id = :chain_id AND snapshot_time = :snapshot_time
-                ORDER BY bucket
-            """),
-            {"chain_id": chain_id, "snapshot_time": snapshot_time},
-        )
-        rows = result.fetchall()
-
-    # Build distribution in correct order
-    bucket_order = ['1.0-1.1', '1.1-1.25', '1.25-1.5', '1.5-2.0', '2.0-3.0', '3.0-5.0', '> 5.0']
-    bucket_data = {row[0]: row for row in rows}
-
-    distribution = []
-    for bucket in bucket_order:
-        if bucket in bucket_data:
-            _, count, collateral, debt = bucket_data[bucket]
-            distribution.append(HealthFactorDistribution(
-                bucket=bucket,
-                count=int(count),
-                total_collateral_usd=float(collateral),
-                total_debt_usd=float(debt),
-            ))
-        else:
-            distribution.append(HealthFactorDistribution(
-                bucket=bucket,
-                count=0,
-                total_collateral_usd=0.0,
-                total_debt_usd=0.0,
-            ))
-
-    return snapshot_time, distribution
-
-
-def _save_hf_snapshot(
-    engine: Engine,
-    chain_id: str,
-    snapshot_time: datetime,
-    distribution: list[HealthFactorDistribution],
-) -> None:
-    """Save HF distribution snapshot to database."""
-    try:
-        with engine.connect() as conn:
-            for bucket_data in distribution:
-                conn.execute(
-                    text("""
-                        INSERT INTO health_factor_snapshots
-                            (snapshot_time, chain_id, bucket, user_count, total_collateral_usd, total_debt_usd)
-                        VALUES (:snapshot_time, :chain_id, :bucket, :user_count, :collateral, :debt)
-                        ON CONFLICT (snapshot_time, chain_id, bucket)
-                        DO UPDATE SET
-                            user_count = EXCLUDED.user_count,
-                            total_collateral_usd = EXCLUDED.total_collateral_usd,
-                            total_debt_usd = EXCLUDED.total_debt_usd
-                    """),
-                    {
-                        "snapshot_time": snapshot_time,
-                        "chain_id": chain_id,
-                        "bucket": bucket_data.bucket,
-                        "user_count": bucket_data.count,
-                        "collateral": bucket_data.total_collateral_usd,
-                        "debt": bucket_data.total_debt_usd,
-                    },
-                )
-            conn.commit()
-            logger.info(f"Saved HF snapshot for {chain_id} at {snapshot_time}")
-    except Exception as e:
-        logger.warning(f"Failed to save HF snapshot: {e}")
-
-
-def _build_distribution(users: dict[str, UserHealthFactor]) -> list[HealthFactorDistribution]:
-    """Build HF distribution buckets."""
-    buckets = {
-        "< 1.0": {"count": 0, "collateral": Decimal(0), "debt": Decimal(0)},
-        "1.0-1.1": {"count": 0, "collateral": Decimal(0), "debt": Decimal(0)},
-        "1.1-1.25": {"count": 0, "collateral": Decimal(0), "debt": Decimal(0)},
-        "1.25-1.5": {"count": 0, "collateral": Decimal(0), "debt": Decimal(0)},
-        "1.5-2.0": {"count": 0, "collateral": Decimal(0), "debt": Decimal(0)},
-        "2.0-3.0": {"count": 0, "collateral": Decimal(0), "debt": Decimal(0)},
-        "3.0-5.0": {"count": 0, "collateral": Decimal(0), "debt": Decimal(0)},
-        "> 5.0": {"count": 0, "collateral": Decimal(0), "debt": Decimal(0)},
-    }
-
-    for user in users.values():
-        hf = user.health_factor
-        if hf is None:
-            continue  # No debt
-
-        if hf < 1.0:
-            bucket = "< 1.0"
-        elif hf < 1.1:
-            bucket = "1.0-1.1"
-        elif hf < 1.25:
-            bucket = "1.1-1.25"
-        elif hf < 1.5:
-            bucket = "1.25-1.5"
-        elif hf < 2.0:
-            bucket = "1.5-2.0"
-        elif hf < 3.0:
-            bucket = "2.0-3.0"
-        elif hf < 5.0:
-            bucket = "3.0-5.0"
-        else:
-            bucket = "> 5.0"
-
-        buckets[bucket]["count"] += 1
-        buckets[bucket]["collateral"] += user.total_collateral_usd
-        buckets[bucket]["debt"] += user.total_debt_usd
-
-    return [
-        HealthFactorDistribution(
-            bucket=k,
-            count=v["count"],
-            total_collateral_usd=float(v["collateral"]),
-            total_debt_usd=float(v["debt"]),
-        )
-        for k, v in buckets.items()
-    ]
-
-
-def _user_to_response(user: UserHealthFactor) -> UserHealthFactorResponse:
-    """Convert UserHealthFactor to response model."""
-    return UserHealthFactorResponse(
-        user_address=user.user_address,
-        health_factor=float(user.health_factor) if user.health_factor else None,
-        total_collateral_usd=float(user.total_collateral_usd),
-        total_debt_usd=float(user.total_debt_usd),
-        is_liquidatable=user.is_liquidatable,
-        positions=[
-            PositionResponse(
-                asset_symbol=p.asset_symbol,
-                asset_address=p.asset_address,
-                collateral_usd=float(p.collateral_usd),
-                debt_usd=float(p.debt_usd),
-                liquidation_threshold=float(p.liquidation_threshold_decimal),
-                is_collateral_enabled=p.is_collateral_enabled,
-            )
-            for p in user.positions
-        ],
-    )
-
-
-def _simulation_to_response(sim: LiquidationSimulation) -> LiquidationSimulationResponse:
-    """Convert LiquidationSimulation to response model."""
-    return LiquidationSimulationResponse(
-        price_drop_percent=float(sim.price_drop_percent),
-        asset_symbol=sim.asset_symbol,
-        asset_address=sim.asset_address,
-        original_price_usd=float(sim.original_price_usd),
-        simulated_price_usd=float(sim.simulated_price_usd),
-        users_at_risk=sim.users_at_risk,
-        users_liquidatable=sim.users_liquidatable,
-        total_collateral_at_risk_usd=float(sim.total_collateral_at_risk_usd),
-        total_debt_at_risk_usd=float(sim.total_debt_at_risk_usd),
-        close_factor=float(sim.close_factor),
-        liquidation_bonus=float(sim.liquidation_bonus),
-        estimated_liquidatable_debt_usd=float(sim.estimated_liquidatable_debt_usd),
-        estimated_liquidator_profit_usd=float(sim.estimated_liquidator_profit_usd),
-        affected_users=sim.affected_users[:50],  # Limit to top 50
-    )
-
-
 @router.get("/{chain_id}", response_model=FullAnalysisResponse)
 def get_health_factor_analysis(
     chain_id: str,
-    max_users: int = Query(default=5000, ge=100, le=20000),
 ) -> FullAnalysisResponse:
     """
     Get comprehensive health factor analysis for a chain.
 
-    Fetches fresh data from the subgraph and saves a snapshot to DB for historical tracking.
+    Returns cached data from the database (updated hourly by scheduler).
+    No subgraph fetch on page load - instant response.
 
     Returns:
     - Summary statistics (total users, at-risk users, etc.)
@@ -340,192 +136,107 @@ def get_health_factor_analysis(
     - At-risk users (HF 1.0-1.5) sorted by lowest HF first
     - Liquidation simulations for WETH price drops
     """
-    require_api_key()
-
     config = get_default_config()
     chain_config = config.get_chain(chain_id)
     if chain_config is None:
         raise HTTPException(status_code=404, detail=f"Unknown chain: {chain_id}")
 
-    # Record snapshot time
-    snapshot_time = datetime.now(timezone.utc)
+    engine = get_db_engine()
 
-    # Fetch user reserves from subgraph
-    fetcher = UserReservesFetcher(chain_config.get_url(), chain_id=chain_id)
+    # Read latest full snapshot from database
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT summary_json, simulation_json, snapshot_time
+                FROM health_factor_full_snapshots
+                WHERE chain_id = :chain_id
+                ORDER BY snapshot_time DESC
+                LIMIT 1
+            """),
+            {"chain_id": chain_id},
+        )
+        row = result.fetchone()
 
-    try:
-        raw_reserves = fetcher.fetch_all_user_reserves(max_users=max_users)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch from subgraph: {e}")
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No health factor data available for {chain_id}. Data is collected hourly - please wait for the next scheduled update."
+        )
 
-    if not raw_reserves:
-        raise HTTPException(status_code=404, detail="No user positions found")
+    summary_json, simulation_json, snapshot_time = row
 
-    # Parse into domain objects
-    all_users = parse_user_reserves(raw_reserves)
+    # Parse JSON back to response models
+    summary_data = summary_json if isinstance(summary_json, dict) else {}
+    simulation_data = simulation_json if isinstance(simulation_json, dict) else None
 
-    # Separate users by HF status
-    users_excluded = [
-        u for u in all_users.values()
-        if u.total_debt_usd > 0 and u.health_factor is not None and u.health_factor <= Decimal("1.0")
-    ]
-
-    # Only include users with HF > 1.0 (or no debt)
-    valid_users = {
-        addr: u for addr, u in all_users.items()
-        if u.total_debt_usd == 0 or u.health_factor is None or u.health_factor > Decimal("1.0")
-    }
-
-    # Calculate statistics from valid users only
-    users_with_debt = [u for u in valid_users.values() if u.total_debt_usd > 0]
-    users_at_risk = [
-        u for u in users_with_debt
-        if u.health_factor and Decimal("1.0") < u.health_factor < Decimal("1.5")
-    ]
-
-    total_collateral = sum(u.total_collateral_usd for u in valid_users.values())
-    total_debt = sum(u.total_debt_usd for u in valid_users.values())
-
-    # Build distribution from valid users only (HF > 1.0)
-    distribution = _build_distribution_filtered(valid_users)
-
-    # Get at-risk users (HF 1.0-1.5), sorted by HF ascending (lowest first)
-    at_risk_sorted = sorted(
-        users_at_risk,
-        key=lambda u: u.health_factor or Decimal("999"),
+    # Build response from cached data
+    summary = HealthFactorSummaryResponse(
+        chain_id=summary_data.get("chain_id", chain_id),
+        data_source=DataSourceInfo(**summary_data.get("data_source", {
+            "price_source": "Aave V3 Oracle",
+            "oracle_address": "unknown",
+            "rpc_url": "unknown",
+            "snapshot_time_utc": snapshot_time.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        })),
+        total_users=summary_data.get("total_users", 0),
+        users_with_debt=summary_data.get("users_with_debt", 0),
+        users_at_risk=summary_data.get("users_at_risk", 0),
+        users_excluded=summary_data.get("users_excluded", 0),
+        total_collateral_usd=summary_data.get("total_collateral_usd", 0.0),
+        total_debt_usd=summary_data.get("total_debt_usd", 0.0),
+        distribution=[
+            HealthFactorDistribution(**d)
+            for d in summary_data.get("distribution", [])
+        ],
+        at_risk_users=[
+            UserHealthFactorResponse(
+                user_address=u["user_address"],
+                health_factor=u.get("health_factor"),
+                total_collateral_usd=u["total_collateral_usd"],
+                total_debt_usd=u["total_debt_usd"],
+                is_liquidatable=u["is_liquidatable"],
+                positions=[PositionResponse(**p) for p in u.get("positions", [])],
+            )
+            for u in summary_data.get("at_risk_users", [])
+        ],
+        reserve_configs=[
+            ReserveConfig(**rc)
+            for rc in summary_data.get("reserve_configs", [])
+        ],
     )
 
-    # Build reserve configs with totals for sorting by popularity
-    asset_totals: dict[str, dict[str, Any]] = {}
-    for user in valid_users.values():
-        for pos in user.positions:
-            addr = pos.asset_address
-            if addr not in asset_totals:
-                asset_totals[addr] = {
-                    "symbol": pos.asset_symbol,
-                    "address": addr,
-                    "ltv": float(pos.ltv / Decimal("10000")),
-                    "liquidation_threshold": float(pos.liquidation_threshold_decimal),
-                    "liquidation_bonus": float(pos.liquidation_bonus_decimal - 1),
-                    "price_usd": float(pos.price_usd / Decimal("1e8")),
-                    "total_collateral_usd": 0.0,
-                    "total_debt_usd": 0.0,
-                }
-            asset_totals[addr]["total_collateral_usd"] += float(pos.collateral_usd)
-            asset_totals[addr]["total_debt_usd"] += float(pos.debt_usd)
-
-    # Sort by total value (collateral + debt) descending
-    reserve_configs = [
-        ReserveConfig(**data)
-        for data in sorted(
-            asset_totals.values(),
-            key=lambda x: x["total_collateral_usd"] + x["total_debt_usd"],
-            reverse=True,
-        )
-    ]
-
-    # Find WETH address for simulations
-    weth_address = None
-    weth_symbol = "WETH"
-    for rc in reserve_configs:
-        if rc.symbol == "WETH":
-            weth_address = rc.address
-            break
-
-    # Run WETH liquidation simulations
+    # Parse simulation data if present
     weth_simulation = None
-    if weth_address and users_with_debt:
-        weth_bonus = Decimal("0.05")
-        for rc in reserve_configs:
-            if rc.symbol == "WETH":
-                weth_bonus = Decimal(str(rc.liquidation_bonus))
-                break
-
-        sim_1 = simulate_liquidations(
-            valid_users, weth_address, weth_symbol, Decimal("1"), liquidation_bonus=weth_bonus
-        )
-        sim_3 = simulate_liquidations(
-            valid_users, weth_address, weth_symbol, Decimal("3"), liquidation_bonus=weth_bonus
-        )
-        sim_5 = simulate_liquidations(
-            valid_users, weth_address, weth_symbol, Decimal("5"), liquidation_bonus=weth_bonus
-        )
-        sim_10 = simulate_liquidations(
-            valid_users, weth_address, weth_symbol, Decimal("10"), liquidation_bonus=weth_bonus
-        )
+    if simulation_data:
+        def parse_sim(sim_dict):
+            return LiquidationSimulationResponse(
+                price_drop_percent=sim_dict["price_drop_percent"],
+                asset_symbol=sim_dict["asset_symbol"],
+                asset_address=sim_dict["asset_address"],
+                original_price_usd=sim_dict["original_price_usd"],
+                simulated_price_usd=sim_dict["simulated_price_usd"],
+                users_at_risk=sim_dict["users_at_risk"],
+                users_liquidatable=sim_dict["users_liquidatable"],
+                total_collateral_at_risk_usd=sim_dict["total_collateral_at_risk_usd"],
+                total_debt_at_risk_usd=sim_dict["total_debt_at_risk_usd"],
+                close_factor=sim_dict["close_factor"],
+                liquidation_bonus=sim_dict["liquidation_bonus"],
+                estimated_liquidatable_debt_usd=sim_dict["estimated_liquidatable_debt_usd"],
+                estimated_liquidator_profit_usd=sim_dict["estimated_liquidator_profit_usd"],
+                affected_users=sim_dict.get("affected_users", []),
+            )
 
         weth_simulation = SimulationScenario(
-            drop_1_percent=_simulation_to_response(sim_1),
-            drop_3_percent=_simulation_to_response(sim_3),
-            drop_5_percent=_simulation_to_response(sim_5),
-            drop_10_percent=_simulation_to_response(sim_10),
+            drop_1_percent=parse_sim(simulation_data["drop_1_percent"]),
+            drop_3_percent=parse_sim(simulation_data["drop_3_percent"]),
+            drop_5_percent=parse_sim(simulation_data["drop_5_percent"]),
+            drop_10_percent=parse_sim(simulation_data["drop_10_percent"]),
         )
-
-    # Build data source info
-    oracle_address = AAVE_ORACLE_ADDRESSES.get(chain_id, "unknown")
-    data_source = DataSourceInfo(
-        price_source="Aave V3 Oracle",
-        oracle_address=oracle_address,
-        rpc_url=get_rpc_url(chain_id),
-        snapshot_time_utc=snapshot_time.strftime("%Y-%m-%d %H:%M:%S UTC"),
-    )
-
-    summary = HealthFactorSummaryResponse(
-        chain_id=chain_id,
-        data_source=data_source,
-        total_users=len(valid_users),
-        users_with_debt=len(users_with_debt),
-        users_at_risk=len(users_at_risk),
-        users_excluded=len(users_excluded),
-        total_collateral_usd=float(total_collateral),
-        total_debt_usd=float(total_debt),
-        distribution=distribution,
-        at_risk_users=[_user_to_response(u) for u in at_risk_sorted],
-        reserve_configs=reserve_configs,
-    )
-
-    # Save snapshot to database for historical tracking
-    try:
-        engine = get_db_engine()
-        _save_hf_snapshot(engine, chain_id, snapshot_time, distribution)
-    except Exception as e:
-        logger.warning(f"Could not save HF snapshot: {e}")
 
     return FullAnalysisResponse(
         summary=summary,
         weth_simulation=weth_simulation,
     )
-
-
-def _build_distribution_filtered(users: dict[str, UserHealthFactor]) -> list[HealthFactorDistribution]:
-    """Build HF distribution histogram for users with HF > 1.0 only."""
-    # Only buckets for HF > 1.0
-    buckets = [
-        ("1.0-1.1", Decimal("1.0"), Decimal("1.1")),
-        ("1.1-1.25", Decimal("1.1"), Decimal("1.25")),
-        ("1.25-1.5", Decimal("1.25"), Decimal("1.5")),
-        ("1.5-2.0", Decimal("1.5"), Decimal("2.0")),
-        ("2.0-3.0", Decimal("2.0"), Decimal("3.0")),
-        ("3.0-5.0", Decimal("3.0"), Decimal("5.0")),
-        ("> 5.0", Decimal("5.0"), Decimal("999999")),
-    ]
-
-    distribution = []
-    for label, low, high in buckets:
-        matching = [
-            u for u in users.values()
-            if u.health_factor is not None and low <= u.health_factor < high
-        ]
-        distribution.append(
-            HealthFactorDistribution(
-                bucket=label,
-                count=len(matching),
-                total_collateral_usd=float(sum(u.total_collateral_usd for u in matching)),
-                total_debt_usd=float(sum(u.total_debt_usd for u in matching)),
-            )
-        )
-
-    return distribution
 
 
 @router.get("/{chain_id}/history", response_model=HealthFactorHistoryResponse)
