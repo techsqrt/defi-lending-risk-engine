@@ -4,8 +4,11 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  BarChart,
+  ComposedChart,
+  AreaChart,
+  Area,
   Bar,
+  Scatter,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -13,9 +16,10 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { fetchHealthFactorAnalysis } from '@/lib/api';
+import { fetchHealthFactorAnalysis, fetchHealthFactorHistory } from '@/lib/api';
 import type {
   HealthFactorAnalysis,
+  HealthFactorHistory,
   LiquidationSimulation,
   UserHealthFactor,
   ReserveConfig,
@@ -59,15 +63,15 @@ function getHFColor(hf: number | null): string {
   return '#22c55e'; // Green - healthy
 }
 
-// Chart colors for distribution (no red since we exclude HF < 1.0)
+// Chart colors for distribution buckets (risk gradient: red -> green)
 function getBucketColor(bucket: string): string {
-  if (bucket === '1.0-1.1') return '#ea580c';
-  if (bucket === '1.1-1.25') return '#f59e0b';
-  if (bucket === '1.25-1.5') return '#eab308';
-  if (bucket === '1.5-2.0') return '#84cc16';
-  if (bucket === '2.0-3.0') return '#22c55e';
-  if (bucket === '3.0-5.0') return '#10b981';
-  return '#059669';
+  if (bucket === '1.0-1.1') return '#dc2626';   // Red - critical
+  if (bucket === '1.1-1.25') return '#ea580c';  // Orange - high risk
+  if (bucket === '1.25-1.5') return '#f59e0b';  // Amber - warning
+  if (bucket === '1.5-2.0') return '#eab308';   // Yellow - caution
+  if (bucket === '2.0-3.0') return '#84cc16';   // Lime - moderate
+  if (bucket === '3.0-5.0') return '#22c55e';   // Green - healthy
+  return '#10b981';                              // Teal - very healthy
 }
 
 // Section component
@@ -149,11 +153,24 @@ function SimulationCard({ sim, title }: { sim: LiquidationSimulation; title: str
 const RESERVES_PER_PAGE = 10;
 const USER_PAGE_SIZES = [10, 25, 50, 100];
 
+// Bucket order and colors for historical chart (risk gradient: red -> green)
+const BUCKET_ORDER = ['1.0-1.1', '1.1-1.25', '1.25-1.5', '1.5-2.0', '2.0-3.0', '3.0-5.0', '> 5.0'];
+const BUCKET_COLORS: Record<string, string> = {
+  '1.0-1.1': '#dc2626',   // Red - critical
+  '1.1-1.25': '#ea580c',  // Orange - high risk
+  '1.25-1.5': '#f59e0b',  // Amber - warning
+  '1.5-2.0': '#eab308',   // Yellow - caution
+  '2.0-3.0': '#84cc16',   // Lime - moderate
+  '3.0-5.0': '#22c55e',   // Green - healthy
+  '> 5.0': '#10b981',     // Teal - very healthy
+};
+
 export default function HealthFactorsPage() {
   const params = useParams();
   const chainId = params.chainId as string;
 
   const [data, setData] = useState<HealthFactorAnalysis | null>(null);
+  const [history, setHistory] = useState<HealthFactorHistory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reservePage, setReservePage] = useState(0);
@@ -166,8 +183,15 @@ export default function HealthFactorsPage() {
     setReservePage(0);
     setUserPage(0);
 
-    fetchHealthFactorAnalysis(chainId)
-      .then(setData)
+    // Fetch main analysis and history in parallel
+    Promise.all([
+      fetchHealthFactorAnalysis(chainId),
+      fetchHealthFactorHistory(chainId, 100).catch(() => null),  // Don't fail if no history
+    ])
+      .then(([analysisData, historyData]) => {
+        setData(analysisData);
+        setHistory(historyData);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [chainId]);
@@ -206,6 +230,11 @@ export default function HealthFactorsPage() {
   const { summary, weth_simulation } = data;
   const atRiskUsers = summary.at_risk_users || [];
   const totalUserPages = Math.ceil(atRiskUsers.length / userPageSize);
+
+  // Pre-calculate max values for bar scaling in at-risk users table
+  const maxCollateral = atRiskUsers.length > 0 ? Math.max(...atRiskUsers.map(u => u.total_collateral_usd)) : 0;
+  const maxDebt = atRiskUsers.length > 0 ? Math.max(...atRiskUsers.map(u => u.total_debt_usd)) : 0;
+  const barWidth = 60; // pixels
 
   return (
     <main style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
@@ -251,11 +280,6 @@ export default function HealthFactorsPage() {
             label="At Risk (HF 1.0-1.5)"
             value={summary.users_at_risk.toLocaleString()}
             subValue={`${((summary.users_at_risk / summary.users_with_debt) * 100 || 0).toFixed(1)}%`}
-          />
-          <StatCard
-            label="Excluded (HF < 1)"
-            value={summary.users_excluded.toLocaleString()}
-            subValue="Dubious data"
           />
           <StatCard label="Total Collateral" value={formatUSD(summary.total_collateral_usd)} />
           <StatCard label="Total Debt" value={formatUSD(summary.total_debt_usd)} />
@@ -348,31 +372,145 @@ export default function HealthFactorsPage() {
 
       {/* HF Distribution Chart */}
       <Section title="Health Factor Distribution">
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={summary.distribution} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={350}>
+          <ComposedChart data={summary.distribution} margin={{ top: 20, right: 60, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
             <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} />
+            <YAxis
+              yAxisId="left"
+              tick={{ fontSize: 11 }}
+              tickFormatter={(value) => formatUSDShort(value)}
+              label={{ value: 'Collateral Volume', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#64748b' } }}
+            />
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tick={{ fontSize: 11 }}
+              label={{ value: 'Users', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: '#64748b' } }}
+            />
             <Tooltip
               formatter={(value: number, name: string) => {
-                if (name === 'count') return [value, 'Users'];
-                return [formatUSD(value), name];
+                if (name === 'Users') return [value.toLocaleString(), 'Users'];
+                if (name === 'Collateral') return [formatUSD(value), 'Collateral'];
+                return [value, name];
               }}
               labelFormatter={(label) => `HF: ${label}`}
             />
-            <Bar dataKey="count" name="count">
+            <Bar yAxisId="left" dataKey="total_collateral_usd" name="Collateral">
               {summary.distribution.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={getBucketColor(entry.bucket)} />
               ))}
             </Bar>
-          </BarChart>
+            <Scatter
+              yAxisId="right"
+              dataKey="count"
+              name="Users"
+              fill="#374151"
+              shape="circle"
+            />
+          </ComposedChart>
         </ResponsiveContainer>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '12px', fontSize: '12px' }}>
-          <span><span style={{ color: '#ea580c' }}>&#9632;</span> Critical (1.0-1.1)</span>
-          <span><span style={{ color: '#f59e0b' }}>&#9632;</span> Warning (1.1-1.25)</span>
-          <span><span style={{ color: '#22c55e' }}>&#9632;</span> Healthy (&gt; 1.5)</span>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '12px', fontSize: '12px', flexWrap: 'wrap' }}>
+          <span><span style={{ color: '#dc2626' }}>&#9632;</span> Critical (1.0-1.1)</span>
+          <span><span style={{ color: '#ea580c' }}>&#9632;</span> High Risk (1.1-1.25)</span>
+          <span><span style={{ color: '#f59e0b' }}>&#9632;</span> Warning (1.25-1.5)</span>
+          <span><span style={{ color: '#22c55e' }}>&#9632;</span> Healthy (&gt;1.5)</span>
+          <span><span style={{ color: '#374151' }}>&#9679;</span> Users</span>
         </div>
       </Section>
+
+      {/* Historical Collateral Distribution (Normalized) */}
+      {history && history.snapshots.length > 1 && (() => {
+        // Transform history data to normalized percentages with numeric timestamp for proper scaling
+        const chartData = history.snapshots.map((snapshot) => {
+          const totalCollateral = BUCKET_ORDER.reduce(
+            (sum, bucket) => sum + (snapshot.buckets[bucket]?.collateral || 0),
+            0
+          );
+          const ts = new Date(snapshot.snapshot_time).getTime();
+          const row: Record<string, number | string> = {
+            timestamp: ts,
+            timeLabel: new Date(snapshot.snapshot_time).toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              timeZone: 'UTC',
+            }) + ' UTC',
+          };
+          // Calculate percentages for each bucket
+          BUCKET_ORDER.forEach((bucket) => {
+            const collateral = snapshot.buckets[bucket]?.collateral || 0;
+            row[bucket] = totalCollateral > 0 ? (collateral / totalCollateral) * 100 : 0;
+          });
+          return row;
+        });
+
+        // Format timestamp for X-axis tick
+        const formatXAxis = (ts: number) => {
+          const d = new Date(ts);
+          return d.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'UTC',
+          });
+        };
+
+        return (
+          <Section title="Historical Collateral Distribution by Health Factor">
+            <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
+              Normalized distribution showing the proportion of total collateral in each health factor bucket over time
+            </p>
+            <ResponsiveContainer width="100%" height={400}>
+              <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} stackOffset="expand">
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+                <XAxis
+                  dataKey="timestamp"
+                  type="number"
+                  scale="time"
+                  domain={['dataMin', 'dataMax']}
+                  tickFormatter={formatXAxis}
+                  tick={{ fontSize: 10 }}
+                  angle={-45}
+                  textAnchor="end"
+                  height={70}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(value) => `${(value * 100).toFixed(0)}%`}
+                  domain={[0, 1]}
+                />
+                <Tooltip
+                  formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, `HF ${name}`]}
+                  labelFormatter={(ts) => formatXAxis(ts as number) + ' UTC'}
+                />
+                {/* Stack areas in reverse order so critical is at bottom (most visible) */}
+                {[...BUCKET_ORDER].reverse().map((bucket) => (
+                  <Area
+                    key={bucket}
+                    type="monotone"
+                    dataKey={bucket}
+                    stackId="1"
+                    stroke={BUCKET_COLORS[bucket]}
+                    fill={BUCKET_COLORS[bucket]}
+                    fillOpacity={0.8}
+                  />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginTop: '12px', fontSize: '11px', flexWrap: 'wrap' }}>
+              {BUCKET_ORDER.map((bucket) => (
+                <span key={bucket}>
+                  <span style={{ color: BUCKET_COLORS[bucket] }}>&#9632;</span> {bucket}
+                </span>
+              ))}
+            </div>
+          </Section>
+        );
+      })()}
 
       {/* WETH Liquidation Simulations */}
       {weth_simulation && (
@@ -427,46 +565,86 @@ export default function HealthFactorsPage() {
                   <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
                     <th style={{ textAlign: 'left', padding: '8px' }}>User</th>
                     <th style={{ textAlign: 'right', padding: '8px' }}>Health Factor</th>
-                    <th style={{ textAlign: 'right', padding: '8px' }}>Collateral</th>
-                    <th style={{ textAlign: 'right', padding: '8px' }}>Debt</th>
+                    <th style={{ textAlign: 'right', padding: '8px', minWidth: '150px' }}>Collateral</th>
+                    <th style={{ textAlign: 'right', padding: '8px', minWidth: '150px' }}>Debt</th>
                     <th style={{ textAlign: 'left', padding: '8px' }}>Positions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {atRiskUsers
                     .slice(userPage * userPageSize, (userPage + 1) * userPageSize)
-                    .map((user) => (
-                    <tr key={user.user_address} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                      <td style={{ padding: '8px' }}>
-                        <a
-                          href={`https://debank.com/profile/${user.user_address}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ color: '#0066cc', textDecoration: 'none' }}
-                        >
-                          {shortenAddress(user.user_address)}
-                        </a>
-                      </td>
-                      <td style={{
-                        padding: '8px',
-                        textAlign: 'right',
-                        fontWeight: '600',
-                        color: getHFColor(user.health_factor),
-                      }}>
-                        {formatHF(user.health_factor)}
-                      </td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>{formatUSD(user.total_collateral_usd)}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>{formatUSD(user.total_debt_usd)}</td>
-                      <td style={{ padding: '8px', fontSize: '12px', color: '#64748b' }}>
-                        {user.positions.map((p) => (
-                          <span key={p.asset_address} style={{ marginRight: '8px' }}>
-                            {p.asset_symbol}: {p.collateral_usd > 0 ? `+${formatUSDShort(p.collateral_usd)}` : ''}
-                            {p.debt_usd > 0 ? ` -${formatUSDShort(p.debt_usd)}` : ''}
-                          </span>
-                        ))}
-                      </td>
-                    </tr>
-                  ))}
+                    .map((user) => {
+                      const collateralPct = maxCollateral > 0 ? (user.total_collateral_usd / maxCollateral) * 100 : 0;
+                      const debtPct = maxDebt > 0 ? (user.total_debt_usd / maxDebt) * 100 : 0;
+                      return (
+                        <tr key={user.user_address} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                          <td style={{ padding: '8px' }}>
+                            <a
+                              href={`https://debank.com/profile/${user.user_address}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: '#0066cc', textDecoration: 'none' }}
+                            >
+                              {shortenAddress(user.user_address)}
+                            </a>
+                          </td>
+                          <td style={{
+                            padding: '8px',
+                            textAlign: 'right',
+                            fontWeight: '600',
+                            color: getHFColor(user.health_factor),
+                          }}>
+                            {formatHF(user.health_factor)}
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                              <span>{formatUSD(user.total_collateral_usd)}</span>
+                              <div style={{
+                                width: `${barWidth}px`,
+                                height: '8px',
+                                background: '#e5e7eb',
+                                borderRadius: '2px',
+                                overflow: 'hidden',
+                              }}>
+                                <div style={{
+                                  width: `${collateralPct}%`,
+                                  height: '100%',
+                                  background: '#3b82f6',
+                                  borderRadius: '2px',
+                                }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                              <span>{formatUSD(user.total_debt_usd)}</span>
+                              <div style={{
+                                width: `${barWidth}px`,
+                                height: '8px',
+                                background: '#e5e7eb',
+                                borderRadius: '2px',
+                                overflow: 'hidden',
+                              }}>
+                                <div style={{
+                                  width: `${debtPct}%`,
+                                  height: '100%',
+                                  background: '#64748b',
+                                  borderRadius: '2px',
+                                }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px', fontSize: '12px', color: '#64748b' }}>
+                            {user.positions.map((p) => (
+                              <span key={p.asset_address} style={{ marginRight: '8px' }}>
+                                {p.asset_symbol}: {p.collateral_usd > 0 ? `+${formatUSDShort(p.collateral_usd)}` : ''}
+                                {p.debt_usd > 0 ? ` -${formatUSDShort(p.debt_usd)}` : ''}
+                              </span>
+                            ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>

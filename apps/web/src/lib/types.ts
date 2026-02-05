@@ -257,3 +257,13 @@ export interface HealthFactorAnalysis {
   summary: HealthFactorSummary;
   weth_simulation: SimulationScenario | null;
 }
+
+export interface HealthFactorHistoryPoint {
+  snapshot_time: string;
+  buckets: Record<string, { user_count: number; collateral: number; debt: number }>;
+}
+
+export interface HealthFactorHistory {
+  chain_id: string;
+  snapshots: HealthFactorHistoryPoint[];
+}

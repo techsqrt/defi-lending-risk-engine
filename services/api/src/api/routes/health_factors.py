@@ -1,11 +1,13 @@
 """Health factor analysis API routes."""
 
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from services.api.src.api.adapters.aave_v3.config import get_default_config, require_api_key
@@ -21,6 +23,8 @@ from services.api.src.api.domain.health_factor import (
     parse_user_reserves,
     simulate_liquidations,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/health-factors", tags=["health-factors"])
 
@@ -113,8 +117,119 @@ class FullAnalysisResponse(BaseModel):
     weth_simulation: SimulationScenario | None
 
 
+class HealthFactorHistoryPoint(BaseModel):
+    """Single time point in HF history with all bucket data."""
+    snapshot_time: str  # ISO format
+    buckets: dict[str, dict[str, float]]  # bucket -> {user_count, collateral, debt}
+
+
+class HealthFactorHistoryResponse(BaseModel):
+    """Historical HF distribution data."""
+    chain_id: str
+    snapshots: list[HealthFactorHistoryPoint]
+
+
 def get_db_engine() -> Engine:
     return get_engine()
+
+
+def _get_latest_snapshot_from_db(
+    engine: Engine,
+    chain_id: str,
+) -> tuple[datetime | None, list[HealthFactorDistribution]]:
+    """
+    Get the latest HF distribution snapshot from the database.
+
+    Returns:
+        Tuple of (snapshot_time, distribution list) or (None, []) if no data
+    """
+    with engine.connect() as conn:
+        # Get the latest snapshot time for this chain
+        result = conn.execute(
+            text("""
+                SELECT MAX(snapshot_time)
+                FROM health_factor_snapshots
+                WHERE chain_id = :chain_id
+            """),
+            {"chain_id": chain_id},
+        )
+        row = result.fetchone()
+        if row is None or row[0] is None:
+            return None, []
+
+        snapshot_time = row[0]
+
+        # Get all bucket data for this snapshot
+        result = conn.execute(
+            text("""
+                SELECT bucket, user_count, total_collateral_usd, total_debt_usd
+                FROM health_factor_snapshots
+                WHERE chain_id = :chain_id AND snapshot_time = :snapshot_time
+                ORDER BY bucket
+            """),
+            {"chain_id": chain_id, "snapshot_time": snapshot_time},
+        )
+        rows = result.fetchall()
+
+    # Build distribution in correct order
+    bucket_order = ['1.0-1.1', '1.1-1.25', '1.25-1.5', '1.5-2.0', '2.0-3.0', '3.0-5.0', '> 5.0']
+    bucket_data = {row[0]: row for row in rows}
+
+    distribution = []
+    for bucket in bucket_order:
+        if bucket in bucket_data:
+            _, count, collateral, debt = bucket_data[bucket]
+            distribution.append(HealthFactorDistribution(
+                bucket=bucket,
+                count=int(count),
+                total_collateral_usd=float(collateral),
+                total_debt_usd=float(debt),
+            ))
+        else:
+            distribution.append(HealthFactorDistribution(
+                bucket=bucket,
+                count=0,
+                total_collateral_usd=0.0,
+                total_debt_usd=0.0,
+            ))
+
+    return snapshot_time, distribution
+
+
+def _save_hf_snapshot(
+    engine: Engine,
+    chain_id: str,
+    snapshot_time: datetime,
+    distribution: list[HealthFactorDistribution],
+) -> None:
+    """Save HF distribution snapshot to database."""
+    try:
+        with engine.connect() as conn:
+            for bucket_data in distribution:
+                conn.execute(
+                    text("""
+                        INSERT INTO health_factor_snapshots
+                            (snapshot_time, chain_id, bucket, user_count, total_collateral_usd, total_debt_usd)
+                        VALUES (:snapshot_time, :chain_id, :bucket, :user_count, :collateral, :debt)
+                        ON CONFLICT (snapshot_time, chain_id, bucket)
+                        DO UPDATE SET
+                            user_count = EXCLUDED.user_count,
+                            total_collateral_usd = EXCLUDED.total_collateral_usd,
+                            total_debt_usd = EXCLUDED.total_debt_usd
+                    """),
+                    {
+                        "snapshot_time": snapshot_time,
+                        "chain_id": chain_id,
+                        "bucket": bucket_data.bucket,
+                        "user_count": bucket_data.count,
+                        "collateral": bucket_data.total_collateral_usd,
+                        "debt": bucket_data.total_debt_usd,
+                    },
+                )
+            conn.commit()
+            logger.info(f"Saved HF snapshot for {chain_id} at {snapshot_time}")
+    except Exception as e:
+        logger.warning(f"Failed to save HF snapshot: {e}")
 
 
 def _build_distribution(users: dict[str, UserHealthFactor]) -> list[HealthFactorDistribution]:
@@ -217,14 +332,13 @@ def get_health_factor_analysis(
     """
     Get comprehensive health factor analysis for a chain.
 
-    Note: Users with HF < 1.0 are excluded from all statistics as they represent
-    dubious data (should have been liquidated). Only users with HF >= 1.0 are included.
+    Fetches fresh data from the subgraph and saves a snapshot to DB for historical tracking.
 
     Returns:
-    - Summary statistics (total users, at-risk users, etc.) - HF >= 1.0 only
-    - HF distribution histogram - HF >= 1.0 only
+    - Summary statistics (total users, at-risk users, etc.)
+    - HF distribution histogram
     - At-risk users (HF 1.0-1.5) sorted by lowest HF first
-    - Liquidation simulations for WETH price drops (1%, 3%, 5%, 10%)
+    - Liquidation simulations for WETH price drops
     """
     require_api_key()
 
@@ -251,8 +365,6 @@ def get_health_factor_analysis(
     all_users = parse_user_reserves(raw_reserves)
 
     # Separate users by HF status
-    # HF <= 1.0: excluded (dubious data - should have been liquidated)
-    # HF > 1.0: included in all stats
     users_excluded = [
         u for u in all_users.values()
         if u.total_debt_usd > 0 and u.health_factor is not None and u.health_factor <= Decimal("1.0")
@@ -284,7 +396,6 @@ def get_health_factor_analysis(
     )
 
     # Build reserve configs with totals for sorting by popularity
-    # Only count from valid users
     asset_totals: dict[str, dict[str, Any]] = {}
     for user in valid_users.values():
         for pos in user.positions:
@@ -321,11 +432,10 @@ def get_health_factor_analysis(
             weth_address = rc.address
             break
 
-    # Run WETH liquidation simulations (using valid users only)
+    # Run WETH liquidation simulations
     weth_simulation = None
     if weth_address and users_with_debt:
-        # Get liquidation bonus from WETH config
-        weth_bonus = Decimal("0.05")  # Default 5%
+        weth_bonus = Decimal("0.05")
         for rc in reserve_configs:
             if rc.symbol == "WETH":
                 weth_bonus = Decimal(str(rc.liquidation_bonus))
@@ -374,6 +484,13 @@ def get_health_factor_analysis(
         reserve_configs=reserve_configs,
     )
 
+    # Save snapshot to database for historical tracking
+    try:
+        engine = get_db_engine()
+        _save_hf_snapshot(engine, chain_id, snapshot_time, distribution)
+    except Exception as e:
+        logger.warning(f"Could not save HF snapshot: {e}")
+
     return FullAnalysisResponse(
         summary=summary,
         weth_simulation=weth_simulation,
@@ -409,3 +526,69 @@ def _build_distribution_filtered(users: dict[str, UserHealthFactor]) -> list[Hea
         )
 
     return distribution
+
+
+@router.get("/{chain_id}/history", response_model=HealthFactorHistoryResponse)
+def get_health_factor_history(
+    chain_id: str,
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> HealthFactorHistoryResponse:
+    """
+    Get historical health factor distribution data for charting.
+
+    Returns snapshots ordered by time ascending, with each snapshot containing
+    all bucket data for that point in time.
+    """
+    engine = get_db_engine()
+
+    with engine.connect() as conn:
+        # Get distinct snapshot times
+        result = conn.execute(
+            text("""
+                SELECT DISTINCT snapshot_time
+                FROM health_factor_snapshots
+                WHERE chain_id = :chain_id
+                ORDER BY snapshot_time DESC
+                LIMIT :limit
+            """),
+            {"chain_id": chain_id, "limit": limit},
+        )
+        times = [row[0] for row in result.fetchall()]
+
+        if not times:
+            return HealthFactorHistoryResponse(chain_id=chain_id, snapshots=[])
+
+        # Fetch all data for these times
+        result = conn.execute(
+            text("""
+                SELECT snapshot_time, bucket, user_count, total_collateral_usd, total_debt_usd
+                FROM health_factor_snapshots
+                WHERE chain_id = :chain_id AND snapshot_time = ANY(:times)
+                ORDER BY snapshot_time ASC, bucket
+            """),
+            {"chain_id": chain_id, "times": times},
+        )
+        rows = result.fetchall()
+
+    # Group by snapshot time
+    snapshots_dict: dict[datetime, dict[str, dict[str, float]]] = {}
+    for row in rows:
+        snap_time, bucket, user_count, collateral, debt = row
+        if snap_time not in snapshots_dict:
+            snapshots_dict[snap_time] = {}
+        snapshots_dict[snap_time][bucket] = {
+            "user_count": float(user_count),
+            "collateral": float(collateral),
+            "debt": float(debt),
+        }
+
+    # Convert to response format (sorted by time ascending)
+    snapshots = [
+        HealthFactorHistoryPoint(
+            snapshot_time=snap_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            buckets=buckets,
+        )
+        for snap_time, buckets in sorted(snapshots_dict.items())
+    ]
+
+    return HealthFactorHistoryResponse(chain_id=chain_id, snapshots=snapshots)
