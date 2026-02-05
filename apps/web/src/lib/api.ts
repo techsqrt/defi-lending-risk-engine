@@ -6,6 +6,7 @@ import type {
   DebugEventsResponse,
   DebugStatsResponse,
   HealthFactorAnalysis,
+  HealthFactorHistory,
 } from './types';
 import type { TimePeriod } from '@/app/components/TimePeriodSelector';
 
@@ -106,6 +107,19 @@ export async function fetchHealthFactorAnalysis(
   );
   if (!res.ok) {
     throw new Error(`Failed to fetch health factor analysis: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchHealthFactorHistory(
+  chainId: string,
+  limit: number = 100
+): Promise<HealthFactorHistory> {
+  const res = await fetch(
+    `${API_BASE}/api/health-factors/${chainId}/history?limit=${limit}`
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch health factor history: ${res.status}`);
   }
   return res.json();
 }

@@ -18,7 +18,10 @@ def run_ingestion() -> None:
     """Run both snapshot and event ingestion for all configured chains."""
     from services.api.src.api.adapters.aave_v3.config import get_default_config
     from services.api.src.api.jobs.ingest_events import ingest_all_events
-    from services.api.src.api.jobs.ingest_snapshots import ingest_all_snapshots
+    from services.api.src.api.jobs.ingest_snapshots import (
+        ingest_all_snapshots,
+        ingest_all_health_factor_snapshots,
+    )
 
     config = get_default_config()
 
@@ -41,6 +44,15 @@ def run_ingestion() -> None:
             logger.info(f"Events {chain.chain_id}: {total} ingested")
         except Exception as e:
             logger.error(f"Event ingestion failed for {chain.chain_id}: {e}")
+
+    # 3. Ingest health factor snapshots
+    logger.info("Starting health factor snapshot ingestion...")
+    try:
+        hf_results = ingest_all_health_factor_snapshots()
+        for chain_id, count in hf_results.items():
+            logger.info(f"HF Snapshots {chain_id}: {count} buckets stored")
+    except Exception as e:
+        logger.error(f"HF snapshot ingestion failed: {e}")
 
 
 @asynccontextmanager
